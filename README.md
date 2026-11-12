@@ -224,4 +224,6 @@ python3 game/打包单页.py
 
 Chrome、Safari、Firefox 已完成实际引擎与玩法验证；Firefox 自动化使用 Playwright 官方构建。Edge 尚未单独验收。Mac 原生启动器已在 Apple Silicon 上运行；Intel 和 Windows x64 已完成交叉构建及格式检查，尚未在对应真机运行。
 
+已修复旧战役动态表累积问题，并完成连续新建战役、Fork / Merge 和失败恢复检查，详见 [稳定性验证记录](docs/stability.md)。
+
 seekdb、Fusion Pixel Font 和 Go 等第三方组件保留各自许可与来源，参见 [第三方声明](docs/third-party-notices.md)。原生试玩包的许可文本已并入 HTML，下载目录不额外堆放说明文件。

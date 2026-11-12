@@ -8,6 +8,7 @@ import {SEA_PALETTE,drawSeaCell} from './海面像素.mjs';
 import {ICON_SIZE, drawPixelIcon, getLevelRewards, WEAPON_INFO} from './像素图鉴.mjs';
 import {createDetailEvidence, buildDetailQuery, isTacticalClueKind} from './细节检索.mjs';
 import {checkRecon, canUseFork, chartColumn, canEnterSea, FORK_DESCRIPTION} from './作战流程.mjs';
+import {DynamicTableResources} from './资源清理.mjs';
 import {LEVELS, ROUND_LIMITS, createRng, createFleet, validateFleet, applyShot, createKnowledge,
   recordShot, chooseEnemyShots, generateEvidence, buildQuery, validateSalvo, sectorBounds, boundsFromCells, resolveAim, weaponPatternAtAnchor, enemyFirePlan, createEnemyFleet, placementBlockedCells} from './海战规则.mjs';
 
@@ -71,6 +72,7 @@ let notes = [];
 let view = 'welcome';
 let tutorialIndex = 0;
 let recordsOpen = false;
+const tableResources = new DynamicTableResources();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function element(tag, className, text) {
@@ -97,6 +99,18 @@ function notify(message, type = 'info') {
   }));
 }
 
+async function createDynamicTable(name, sql, parent = null) {
+  return tableResources.create(name, () => db.exec(sql), parent);
+}
+
+async function cleanupDynamicTables() {
+  await tableResources.cleanup({
+    keep: [campaign?.notesTable, tableNames?.live, tableNames?.checkpoint, tableNames?.notes],
+    drop: name => db.exec(`DROP TABLE IF EXISTS \`${name}\``),
+    warn: (name, error) => console.warn(`动态表清理失败，将在后续动作重试：${name}`, error),
+  });
+}
+
 async function operation(work) {
   if (busy) return;
   // SQL动作失败时恢复可操作状态；序号保持单调，已创建的分支名称不复用。
@@ -119,7 +133,11 @@ async function operation(work) {
     if (state?.activeSector) state.knowledge = state.sectorKnowledge[state.activeSector];
     notify(`执行失败：${error.message}`, 'error');
     $('engine-detail').textContent = error.message;
-  } finally { busy = false; render(); }
+  } finally {
+    // 成功时保留新引用；失败时backup已恢复，先保留旧引用再清理孤立分支。
+    await cleanupDynamicTables();
+    busy = false; render();
+  }
 }
 
 function boardSize() { return state?.player.size ?? 8; }
@@ -174,7 +192,7 @@ async function startCampaign(seed = freshSeed()) {
   $('new-seed').value = cleanSeed;
   await db.exec("DELETE FROM capabilities WHERE owner='player'");
   const name = `notes_main_${serial}`;
-  await db.exec(`CREATE TABLE ${name} (id VARCHAR(80) PRIMARY KEY, level_no INT, round_no INT, kind VARCHAR(12), body TEXT)`);
+  await createDynamicTable(name, `CREATE TABLE ${name} (id VARCHAR(80) PRIMARY KEY, level_no INT, round_no INT, kind VARCHAR(12), body TEXT)`);
   campaign.notesTable = name;
   await prepareLevel();
 }
@@ -272,17 +290,17 @@ async function confirmDeployment() {
   if (tableNames) {
     await saveState();
     const checkpoint = `checkpoint_edit_${campaign.id}_${campaign.level}_${++serial}`;
-    await db.exec(`FORK TABLE ${tableNames.live} TO ${checkpoint}`); tableNames.checkpoint = checkpoint;
+    await createDynamicTable(checkpoint, `FORK TABLE ${tableNames.live} TO ${checkpoint}`, tableNames.live); tableNames.checkpoint = checkpoint;
     setView(state.activeSector ? 'battle' : state.queryUsed ? 'theater' : 'intel');
     notify('舰队已就位。'); return;
   }
   state.queryUsed = false;
   const unique = `${campaign.id}_${campaign.level}_${++serial}`;
   tableNames = {live: `live_${unique}`, checkpoint: `checkpoint_${unique}`, notes: `notes_work_${unique}`};
-  await db.exec(`CREATE TABLE ${tableNames.live} (id INT PRIMARY KEY, state_json LONGTEXT)`);
+  await createDynamicTable(tableNames.live, `CREATE TABLE ${tableNames.live} (id INT PRIMARY KEY, state_json LONGTEXT)`);
   await db.exec(`INSERT INTO ${tableNames.live} VALUES (1,${quote(JSON.stringify(packState()))})`);
-  await db.exec(`FORK TABLE ${tableNames.live} TO ${tableNames.checkpoint}`);
-  await db.exec(`FORK TABLE ${campaign.notesTable} TO ${tableNames.notes}`);
+  await createDynamicTable(tableNames.checkpoint, `FORK TABLE ${tableNames.live} TO ${tableNames.checkpoint}`, tableNames.live);
+  await createDynamicTable(tableNames.notes, `FORK TABLE ${campaign.notesTable} TO ${tableNames.notes}`, campaign.notesTable);
   await dealEvidence();
   view = 'intel';
   notify('舰队部署完成。先读任务目标，再为每种检索选资料；对应能力会自动装配。');
@@ -780,7 +798,7 @@ async function rewind() {
     kind: row.kind, message: row.body, previous: true})).reverse();
   const nextLive = `live_restore_${campaign.id}_${campaign.level}_${++serial}`;
   const forkSql = `FORK TABLE ${tableNames.checkpoint} TO ${nextLive}`;
-  await db.exec(forkSql);
+  await createDynamicTable(nextLive, forkSql, tableNames.checkpoint);
   const restored = await db.query(`SELECT state_json FROM ${nextLive} WHERE id=1`);
   state = JSON.parse(restored.rows[0].state_json);
   state.enemy = createEnemyFleet({level: campaign.level, seed: state.enemySeed});
@@ -788,7 +806,7 @@ async function rewind() {
   if (state.activeSector) state.knowledge = state.sectorKnowledge[state.activeSector];
   state.phase = 'player'; view = 'intel'; tableNames.live = nextLive;
   const nextNotes = `notes_after_${campaign.id}_${campaign.level}_${serial}`;
-  await db.exec(`FORK TABLE ${campaign.notesTable} TO ${nextNotes}`); tableNames.notes = nextNotes;
+  await createDynamicTable(nextNotes, `FORK TABLE ${campaign.notesTable} TO ${nextNotes}`, campaign.notesTable); tableNames.notes = nextNotes;
   targets=[];detailSelection={sample:'',keyword:''};state.lastSql=forkSql;
   await dealEvidence(); await saveState();
   campaign.rewinds[campaign.level] = 1; campaign.lastForkUseLevel = campaign.level;
