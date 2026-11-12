@@ -1,0 +1,80 @@
+{
+  "source": "seekdb official browser shell release",
+  "release": "d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887",
+  "license": "Apache-2.0; see LICENSE; generated engine also links upstream dependencies",
+  "retrieved": "2026-11-11",
+  "files": [
+    {
+      "file": "database.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/database.mjs",
+      "bytes": 10451,
+      "sha256": "fa9f6c6d556cf07dc4ab1c462165d063c979d942fa945dcfed6714b8020d39eb"
+    },
+    {
+      "file": "database-worker.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/database-worker.mjs",
+      "bytes": 266,
+      "sha256": "6328f8a01e0a9a13ec36719c12bcaa479b9c1150c3964eddefc1849df50dc698"
+    },
+    {
+      "file": "worker-server.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/worker-server.mjs",
+      "bytes": 9370,
+      "sha256": "d2856aade12797702508848f4f04fd76e99d22143ebfb72a005fda099a14d524"
+    },
+    {
+      "file": "runtime-host.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/runtime-host.mjs",
+      "bytes": 8023,
+      "sha256": "b61214af11e94ebda6bd405d9c5184e6ef76adf0847267098c7a21de6c4ca3ed"
+    },
+    {
+      "file": "storage-cleanup-worker.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/storage-cleanup-worker.mjs",
+      "bytes": 2794,
+      "sha256": "a485bafc2cd6f87bb7b3561f22f32aebab382e67f41899077388ea3eee2e82d3"
+    },
+    {
+      "file": "mysql-wire.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/mysql-wire.mjs",
+      "bytes": 13346,
+      "sha256": "1d83605845bc8229a5d7dc0c2d474f78f8dd814eac0a839345d987b677bea6f3"
+    },
+    {
+      "file": "mysql-client.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/mysql-client.mjs",
+      "bytes": 4790,
+      "sha256": "6b3aa11ea22dda124cdafbf042627bda498ad455b8b464ac3c8c387c38f1c8ad"
+    },
+    {
+      "file": "mysql-transport.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/mysql-transport.mjs",
+      "bytes": 2806,
+      "sha256": "eeb92d4e517c503c6258ddfd7e7be7721e4ee898b88a63ec360766b6cf7e9085"
+    },
+    {
+      "file": "mysql-auth.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/mysql-auth.mjs",
+      "bytes": 3911,
+      "sha256": "c980837d7875c375d86129e1dfa8806b28a7915ed9aed9b08da80674eff0177c"
+    },
+    {
+      "file": "seekdb_wasm_database.mjs",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/seekdb_wasm_database.mjs",
+      "bytes": 154202,
+      "sha256": "7e15164b6a830e991169b2482a94146fac4f1f5c97e143db90ce7d3a02f75dfe"
+    },
+    {
+      "file": "seekdb_wasm_database.wasm",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/seekdb_wasm_database.wasm",
+      "bytes": 57093736,
+      "sha256": "8122b07878b15bd565090473b73fd623684c346325eb2d0d053b36b30253bfbb"
+    },
+    {
+      "file": "seekdb_wasm_database.webkit.wasm",
+      "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/seekdb_wasm_database.webkit.wasm",
+      "bytes": 58713214,
+      "sha256": "9f7ca760a80fdd2fc88bd35c078d7dacde43f14a698005748f50a5b335765f39"
+    }
+  ]
+}

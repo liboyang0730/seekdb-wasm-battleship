@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "description": "公开分发的第三方来源与 NOTICE 边界；本文件不为本项目原创代码或品牌授予新许可证。",
+  "retrievedAt": "2026-11-12T11:13:49+00:00",
+  "seekdbEngine": {
+    "source": "seekdb official browser shell release",
+    "release": "d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887",
+    "sourceRecord": "来源.json",
+    "licenseFile": "LICENSE",
+    "licenseId": "Apache-2.0",
+    "binaries": [
+      {
+        "path": "seekdb_wasm_database.wasm",
+        "bytes": 57093736,
+        "sha256": "8122b07878b15bd565090473b73fd623684c346325eb2d0d053b36b30253bfbb",
+        "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/seekdb_wasm_database.wasm",
+        "modified": false
+      },
+      {
+        "path": "seekdb_wasm_database.webkit.wasm",
+        "bytes": 58713214,
+        "sha256": "9f7ca760a80fdd2fc88bd35c078d7dacde43f14a698005748f50a5b335765f39",
+        "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/seekdb_wasm_database.webkit.wasm",
+        "modified": false
+      }
+    ],
+    "notice": {
+      "path": "NOTICE",
+      "bytes": 11071,
+      "sha256": "c753aec56c61055ae25ca41d71984674b1f32d2e1c745efbbaa5bdbaf3ab2a0b",
+      "repository": "https://github.com/oceanbase/seekdb",
+      "tag": "v1.4.0",
+      "tagCommit": "de5be277d4398b0cad018a666a54be0d99470543",
+      "tagApi": "https://api.github.com/repos/oceanbase/seekdb/git/ref/tags/v1.4.0",
+      "tagUrl": "https://raw.githubusercontent.com/oceanbase/seekdb/v1.4.0/NOTICE",
+      "pinnedSourceUrl": "https://raw.githubusercontent.com/oceanbase/seekdb/de5be277d4398b0cad018a666a54be0d99470543/NOTICE",
+      "tagAndPinnedBytesIdentical": true,
+      "modifications": "无。NOTICE 按固定 commit 的原始字节复制。",
+      "sections": [
+        "libev",
+        "http_parser",
+        "lz4.171",
+        "lz4.191",
+        "snappy",
+        "zlib",
+        "zstd"
+      ],
+      "scope": "该文件是上游 v1.4.0 源码树的 NOTICE，用于保留第三方归属。浏览器 shell 发布 ID 与此源码 commit 的精确构建对应关系尚未由公开元数据证实；不得将本文件宣称为该 Wasm 实际链接依赖的完整清单或 SBOM。"
+    },
+    "checkedReleaseEndpoints": [
+      {
+        "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/NOTICE",
+        "httpStatus": 404
+      },
+      {
+        "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/NOTICE",
+        "httpStatus": 404
+      },
+      {
+        "url": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/manifest.json",
+        "httpStatus": 404
+      }
+    ],
+    "distributionPatches": "单页构建会重定位 JavaScript 模块、Wasm URL 和 Worker URL；对应改动由构建清单 packagedPatches 记录。两个 Wasm 二进制未修改。"
+  },
+  "otherBundledComponents": [
+    {
+      "name": "Fusion Pixel Font",
+      "asset": "../assets/fusion-pixel-12px.woff2",
+      "licenseId": "OFL-1.1",
+      "licenseFile": "../assets/字体许可证.txt",
+      "sourceRecord": "../assets/字体来源.json",
+      "upstreamLicense": "https://raw.githubusercontent.com/TakWolf/fusion-pixel-font/master/LICENSE-OFL"
+    },
+    {
+      "name": "Go runtime",
+      "licenseId": "BSD-3-Clause",
+      "licenseFile": "../离线启动器/LICENSE-Go.txt",
+      "upstreamLicense": "https://go.dev/LICENSE"
+    },
+    {
+      "name": "seekdb logo",
+      "asset": "../assets/branding/seekdb-logo.png",
+      "source": "用户提供的原始 PNG，未修改原始文件字节。界面低分辨率呈现由代码生成。",
+      "licenseScope": "品牌与商标不因本项目代码公开而自动获得额外许可。"
+    }
+  ],
+  "publicationExclusions": "本公开运行包不应包含商用游戏 ROM、反汇编、原作截图/录屏/音频、原作手册、内部文档或凭据。研究资料不作为本项目运行依赖。"
+}

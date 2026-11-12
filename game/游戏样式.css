@@ -1,0 +1,600 @@
+/* 分步作战界面：屏幕显隐交给主程序，字体与操作区保持清晰。 */
+@font-face { font-family: "PixelChinese"; src: url("./assets/fusion-pixel-12px.woff2") format("woff2"); font-style: normal; font-weight: 400; font-display: swap; }
+:root {
+  color-scheme: light;
+  --page: #dce4e8;
+  --paper: #fff4da;
+  --paper-inset: #ece7d9;
+  --selected: #d1e6ee;
+  --selected-hover: #bedce9;
+  --ink: #182f45;
+  --ink-soft: #344f61;
+  --muted: #4f6270;
+  --orange: #ed8a68;
+  --accent-text: #99452e;
+  --accent-ink: #0f5b75;
+  --hit: #a33529;
+  --candidate: #176049;
+  --edge: #0c2238;
+  --line: #9aaab3;
+  --sea: #1683b5;
+  --sea-light: #d8e8ed;
+  --warning-paper: #ffe2b3;
+  --title-red: #b7342a;
+  --title-shadow: #e9d3ad;
+  --scrim: #0c2238e6;
+  --mono: "PixelChinese", monospace;
+  --sans: "PixelChinese", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html { background: var(--page); font-size: 24px; scroll-padding-top: 150px; }
+body { margin: 0; color: var(--ink); background: var(--page); font: 1rem/1.5 var(--sans); -webkit-font-smoothing: none; -moz-osx-font-smoothing: auto; text-rendering: optimizeSpeed; }
+body::before { position: fixed; z-index: 20; inset: 0; pointer-events: none; content: ""; opacity: .035; background-image: radial-gradient(var(--ink) .6px, transparent .7px); background-size: 4px 4px; }
+button, input, select { font: inherit; border-radius: 0; }
+button, input, select, summary { -webkit-tap-highlight-color: transparent; }
+button, summary { cursor: pointer; touch-action: manipulation; }
+button:disabled, select:disabled { cursor: not-allowed; }
+button, input, select, canvas, pre, summary, a { outline-offset: 4px; }
+:focus-visible { outline: 3px solid var(--accent-ink); }
+button:focus:not(:focus-visible) { outline: none; }
+[hidden] { display: none !important; }
+h1, h2, h3, h4, p, ol, dl, dd { margin: 0; }
+h1, h2, h3, h4 { line-height: 1.35; text-wrap: balance; }
+p { text-wrap: pretty; }
+a { color: var(--accent-ink); }
+::selection { color: var(--ink); background: var(--orange); }
+.terminal-shell { width: min(1360px, 100%); margin: 0 auto; padding: 0 32px; }
+.skip-link { position: fixed; z-index: 50; top: 12px; left: 16px; padding: 12px 18px; color: var(--paper); background: var(--ink); transform: translateY(-180%); }
+.skip-link:focus { transform: translateY(0); }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 52px; padding: 11px 19px; border: 2px solid var(--edge); color: var(--ink); background: var(--selected); font-size: 24px; font-weight: 400; line-height: 1.45; text-align: center; transition: transform 110ms ease-out, opacity 110ms ease-out; }
+.button-primary { border-color: var(--accent-text); color: var(--ink); background: var(--orange); box-shadow: 4px 4px 0 var(--edge); }
+.button-secondary { border-color: var(--muted); color: var(--ink); background: transparent; }
+.button-quiet { border-color: transparent; color: var(--ink-soft); background: transparent; }
+.button-full { justify-content: space-between; width: 100%; }
+.button:disabled { opacity: .5; }
+.button:active:not(:disabled) { transform: translate(1px, 2px); }
+@media (hover: hover) { .button:not(:disabled):hover { border-color: var(--ink); background: var(--selected-hover); }.button-primary:not(:disabled):hover { border-color: var(--accent-ink); color: var(--ink); background: var(--orange); } }
+input[type="text"], select { width: 100%; min-width: 0; min-height: 52px; padding: 10px 13px; border: 2px solid var(--edge); color: var(--ink); background: var(--paper-inset); font-size: 24px; }
+select { padding-right: 32px; }
+select option { color: var(--ink); background: var(--page); }
+input[type="checkbox"] { flex: 0 0 22px; width: 22px; height: 22px; margin: 3px 0 0; accent-color: var(--accent-text); }
+summary { min-height: 48px; padding: 10px 0; color: var(--ink-soft); font-size: 24px; }
+
+/* 原始品牌图由像素控件缩绘，标题使用已有像素字库。 */
+.masthead { position: sticky; top: 0; z-index: 40; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand actions" "brand motto"; align-items: center; gap: 4px 20px; min-height: 130px; margin-bottom: 16px; padding: 12px 18px; border: 3px solid var(--edge); background: var(--paper); box-shadow: 0 4px 0 var(--edge); }
+.brand { grid-area: brand; min-width: 0; }
+.brand h1 { display: flex; align-items: center; gap: 18px; margin: 0; font-weight: 400; line-height: 1; white-space: nowrap; }
+.brand-logo { display: block; flex: 0 0 auto; width: 216px; height: 51px; image-rendering: pixelated; }
+.brand-game-title { display: block; color: var(--title-red); font-family: var(--sans); font-size: 48px; font-weight: 400; font-synthesis: none; line-height: 1.25; letter-spacing: 0; text-shadow: 2px 2px 0 var(--title-shadow); }
+.brand-motto { grid-area: motto; justify-self: end; min-width: 0; text-align: right; color: var(--ink-soft); }
+.brand-motto > span { display: block; overflow-wrap: anywhere; }
+.brand-motto > [lang="zh-CN"] { font-size: 24px; line-height: 1.25; }
+.brand-motto > [lang="en"] { margin-top: 4px; font-size: 12px; line-height: 1.5; }
+.footer-logo { display: block; width: 100px; height: auto; object-fit: contain; }
+.header-actions { grid-area: actions; justify-self: end; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.header-actions .button { padding-right: 13px; padding-left: 13px; }
+.campaign-details { position: relative; }
+.campaign-details > summary { padding: 12px 13px; list-style-position: inside; }
+.campaign-readout { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; width: min(570px, calc(100vw - 40px)); padding: 22px; border: 2px solid var(--orange); background: var(--paper); box-shadow: 0 0 0 4px var(--page); }
+.campaign-readout h2 { font-size: 28px; }.campaign-readout p { margin-top: 9px; color: var(--ink-soft); font-size: 24px; }
+.mission-readout { display: flex; flex-wrap: wrap; gap: 18px 28px; margin-top: 19px; }.mission-readout dt { color: var(--muted); font-size: 24px; }.mission-readout dd { margin-top: 3px; color: var(--accent-ink); font-family: var(--mono), var(--sans); font-size: 24px; overflow-wrap: anywhere; }
+.stage-list, .badge-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 17px; }.stage-chip, .stage-step { display: inline-grid; place-items: center; min-width: 40px; min-height: 40px; padding: 5px 9px; border: 2px solid var(--edge); color: var(--muted); background: var(--page); font-family: var(--mono); font-size: 24px; }.stage-chip.active, .stage-step.active { border-color: var(--accent-text); color: var(--ink); background: var(--orange); }.stage-chip.done { color: var(--candidate); }
+.badge, .badge-list > span { padding: 6px 9px; border: 2px solid var(--edge); color: var(--accent-ink); font-size: 24px; }
+.flow-guide { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 5px 19px; padding: 20px 0 15px; }
+.flow-status { color: var(--accent-text); font-size: 24px; font-weight: 400; }
+.flow-guide h2 { color: var(--ink); font-size: 36px; font-weight: 400; letter-spacing: -.02em; }
+.flow-guide > p:last-child { grid-column: 2; color: var(--ink-soft); font-size: 28px; }
+.status-message { margin-bottom: 17px; padding: 10px 14px; border: 2px solid var(--line); color: var(--ink-soft); background: var(--paper); font-size: 24px; line-height: 1.5; }
+.status-message:empty { display: none; }.status-message.error, .status-message[data-tone="error"] { color: var(--hit); border-color: var(--hit); }.status-message.success { color: var(--candidate); }
+.game-screen { min-width: 0; padding-top: 5px; }
+.screen-kicker { color: var(--accent-text); font-size: 24px; }
+.screen-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.section-help { margin-top: 6px; margin-bottom: 12px; color: var(--ink-soft); font-size: 24px; line-height: 1.55; }
+.empty-state { padding: 18px; border: 1px dashed var(--edge); color: var(--muted); font-size: 24px; }
+
+/* 开场与三步教学。 */
+.engine-readout { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: start; gap: 9px 12px; margin-bottom: 14px; }.status-light { width: 7px; height: 7px; margin-top: 11px; color: var(--accent-text); background: currentColor; box-shadow: none; }#engine-status { color: var(--ink); font-size: 24px; }#engine-detail { margin-top: 4px; color: var(--muted); font-size: 24px; overflow-wrap: anywhere; }#engine-progress { grid-column: 2; display: block; width: 100%; height: 6px; border: 0; background: var(--paper-inset); accent-color: var(--accent-text); }#engine-progress::-webkit-progress-bar { background: var(--paper-inset); }#engine-progress::-webkit-progress-value { background: var(--orange); }#engine-progress::-moz-progress-bar { background: var(--orange); }
+.seed-details { margin-top: 16px; border-top: 2px solid var(--line); }.seed-details > label { display: block; margin: 4px 0 12px; color: var(--muted); font-size: 24px; }.seed-controls { display: flex; gap: 9px; }.seed-controls input { font-family: var(--mono); }.seed-controls .button { flex: 0 0 auto; }
+.welcome-simple { max-width: 820px; margin: 36px auto 50px; padding: 32px; border: 3px solid var(--edge); background: var(--paper); box-shadow: 6px 6px 0 var(--edge); text-align: center; }
+.welcome-one-line { margin-bottom: 28px; color: var(--ink); font-size: 28px; }
+.welcome-simple > .button { min-height: 68px; padding-right: 30px; padding-left: 30px; font-size: 28px; }
+.welcome-simple .engine-readout { max-width: 500px; margin: 28px auto 0; text-align: left; }
+.welcome-options, .tutorial-options { margin-top: 22px; text-align: left; }
+.welcome-options > label { display: block; margin: 20px 0 10px; font-size: 24px; }
+.welcome-options #engine-detail { margin-top: 16px; font-size: 18px; }
+.welcome-options > .button { width: 100%; }
+.tutorial-card { max-width: 850px; margin: 22px auto 40px; padding: 35px; border: 3px solid var(--edge); background: var(--paper); box-shadow: 6px 6px 0 var(--edge); }
+.tutorial-card h3 { margin-top: 14px; color: var(--ink); font-size: 36px; }
+.tutorial-card > p:not(.screen-kicker) { margin-top: 20px; color: var(--ink-soft); font-size: 28px; line-height: 1.7; }
+.tutorial-card > .button { margin-top: 28px; min-height: 64px; font-size: 28px; }
+.tutorial-options > summary { font-size: 18px; }
+
+/* 出航前明确确认，默认阵型与手动调整都走同一个入口。 */
+.deployment-instructions { max-width: 1120px; margin: 0 auto 24px; }
+.deployment-instructions h3 { margin-bottom: 6px; font-size: 32px; font-weight: 400; }
+.deployment-instructions > p { color: var(--ink-soft); font-size: 24px; }
+.deployment-instructions ol { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding: 0; list-style: none; }
+.deployment-instructions li { padding: 7px 12px; border: 2px solid var(--edge); background: var(--selected); font-size: 24px; }
+/* 本作禁止不同舰船接壤，用九宫格说明斜角同样不可放。 */
+.deployment-spacing-rule { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 16px; max-width: 1120px; margin: 0 auto 22px; padding: 12px 16px; border: 2px solid var(--edge); background: var(--paper); }
+.deployment-spacing-rule p { color: var(--ink); font-size: 24px; line-height: 1.5; }
+.deployment-spacing-rule .spacing-example-caption { margin-top: 4px; color: var(--muted); font-size: 18px; }
+.spacing-example { display: grid; grid-template-columns: repeat(3, 24px); width: 72px; background: var(--sea-light); }
+.spacing-example > span { display: grid; place-items: center; height: 24px; color: var(--hit); font-size: 24px; line-height: 1; }
+.spacing-example > .spacing-ship { color: var(--ink); background: var(--selected); }
+/* 共享舰队画布在两个插槽之间移动，保持唯一实例。 */
+.chart-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px 15px; margin-bottom: 11px; }.chart-heading h3 { color: var(--ink); font-size: 28px; font-weight: 400; }.chart-heading > span { color: var(--muted); font-size: 24px; }
+.chart-frame { position: relative; width: 100%; padding: 7px; border: 2px solid var(--edge); background-color: var(--paper-inset); background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 28px 28px; }
+.chart-frame canvas { display: block; width: 100%; height: auto; background: var(--paper-inset); image-rendering: pixelated; touch-action: manipulation; }
+.fleet-frame canvas, .enemy-frame canvas { aspect-ratio: 10 / 9; }.theater-frame canvas { aspect-ratio: 560 / 360; }
+.fleet-caption, .chart-caption { margin-top: 11px; color: var(--ink-soft); font-size: 24px; line-height: 1.55; }
+.chart-corner { position: absolute; z-index: 1; width: 11px; height: 11px; border: 2px solid var(--orange); pointer-events: none; }.corner-nw { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }.corner-ne { top: -2px; right: -2px; border-left: 0; border-bottom: 0; }.corner-sw { bottom: -2px; left: -2px; border-right: 0; border-top: 0; }.corner-se { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
+.deploy-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(370px, 1fr); align-items: start; gap: 50px; max-width: 1120px; margin: 0 auto; }.deploy-slot .fleet-station { max-width: 500px; }.deploy-slot .fleet-frame { width: 500px; max-width: 100%; }.deploy-slot #fleet-board { width: 480px; max-width: 100%; height: 432px; }.fleet-controls h3 { margin-bottom: 12px; font-size: 28px; font-weight: 400; }
+.ship-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }.ship-list > button { min-height: 50px; padding: 9px 12px; border: 2px solid var(--edge); color: var(--ink-soft); background: var(--paper); font-size: 24px; text-align: left; }.ship-list > button.selected, .ship-list > button.active, .ship-list > button[aria-pressed="true"] { border-color: var(--accent-text); color: var(--accent-ink); background: var(--selected); }.ship-list > p { grid-column: 1 / -1; color: var(--muted); font-size: 24px; }
+.selected-ship { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 13px; margin-top: 16px; padding: 12px 14px; border: 2px solid var(--orange); background: var(--selected); }.selected-ship > span { color: var(--ink-soft); font-size: 24px; }.selected-ship strong { color: var(--accent-ink); font-size: 28px; font-weight: 400; }#selected-ship-direction { flex-basis: 100%; }
+.fleet-button-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; }.placement-hint { margin-top: 12px; color: var(--ink-soft); font-size: 24px; }.toggle-label { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0; color: var(--ink-soft); font-size: 24px; }.toggle-label:has(input:disabled) { opacity: .55; }
+
+/* 情报画面：资料卡完整展开，资料增多时只随整页滚动。 */
+.mission-objective { margin-bottom: 16px; color: var(--ink); font-size: 24px; line-height: 1.5; overflow-wrap: anywhere; }
+.selection-checklist { margin-top: 12px; padding: 8px 12px; border-left: 4px solid var(--accent-ink); color: var(--ink); background: var(--selected); font-size: 24px; line-height: 1.5; overflow-wrap: anywhere; }
+.intel-workspace { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 18px; }.intel-section h3, .query-heading h3 { font-size: 28px; font-weight: 400; }.evidence-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.evidence-item { display: block; width: 100%; padding: 16px; border: 3px solid var(--edge); color: var(--ink); background: var(--paper); font-size: 24px; text-align: left; }.evidence-meta { display: block; margin-bottom: 8px; color: var(--accent-ink); font-size: 18px; }.evidence-item strong { display: block; margin-bottom: 5px; color: var(--ink); font-size: 26px; font-weight: 400; }.evidence-body { display: block; color: var(--ink-soft); font-size: 24px; line-height: 1.6; }.evidence-item.selected, .evidence-item[aria-pressed="true"] { border-color: var(--accent-ink); background: var(--selected); box-shadow: 4px 4px 0 var(--edge); }.evidence-item:disabled { opacity: .65; }
+.abilities-section { margin-top: 16px; }.abilities-section > h3 { display: none; }.ability-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 12px; }.ability-item { display: block; min-height: 82px; padding: 12px 14px; border: 2px solid var(--edge); color: var(--ink); background: var(--paper); font-size: 24px; text-align: left; }.ability-item strong { display: block; color: var(--ink); font-size: 26px; font-weight: 400; }.ability-item small { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 20px; line-height: 1.5; }.ability-item.selected, .ability-item[aria-pressed="true"] { border-color: var(--accent-ink); background: var(--selected); box-shadow: 4px 4px 0 var(--edge); }.ability-item:disabled { opacity: .6; }.ability-list > p { grid-column: 1 / -1; font-size: 24px; }
+.query-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }.query-indicator { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; }.query-indicator i { width: 4px; height: 5px; background: var(--edge); }.query-station.is-running .query-indicator i, .query-station[data-running="true"] .query-indicator i { height: 12px; background: var(--orange); animation: query-scan 650ms steps(2, end) infinite; }.query-station.is-running .query-indicator i:nth-child(2) { animation-delay: 90ms; }.query-station.is-running .query-indicator i:nth-child(3) { animation-delay: 180ms; }.query-station.is-running .query-indicator i:nth-child(4) { animation-delay: 270ms; }.query-station.is-running .query-indicator i:nth-child(5) { animation-delay: 360ms; }
+@keyframes query-scan { 0%, 100% { transform: scaleY(.35); opacity: .35; } 50% { transform: scaleY(1); opacity: 1; } }
+.sql-editor { border: 2px solid var(--edge); background: var(--paper-inset); }.console-topline { display: flex; justify-content: space-between; gap: 12px; padding: 9px 14px; border-bottom: 2px solid var(--line); color: var(--muted); font-size: 24px; }.console-topline > span:last-child { color: var(--accent-text); font-family: var(--mono); }
+.sql-preview, #last-executed-sql, .executed-detail-sql { min-width: 0; min-height: 110px; margin: 0; padding: 15px; color: var(--ink-soft); background: var(--paper-inset); font-family: var(--mono); font-size: 24px; line-height: 1.45; tab-size: 2; white-space: pre-wrap; overflow-wrap: anywhere; }
+.query-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 12px; }.query-meta { margin-top: 11px; color: var(--accent-ink); font-size: 24px; }.query-result { min-width: 0; margin-top: 9px; padding-top: 10px; border-top: 2px solid var(--edge); color: var(--ink-soft); font-size: 24px; overflow-wrap: anywhere; }.result-list p { margin-bottom: 8px; font-size: 24px; }.result-list table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 24px; font-variant-numeric: tabular-nums; }.result-list th, .result-list td { padding: 8px 11px; border-bottom: 2px solid var(--line); text-align: left; white-space: normal; overflow-wrap: anywhere; }.result-list th { color: var(--accent-ink); font-weight: 400; }.result-list td { color: var(--ink-soft); }
+
+/* 情报解读保留实际 SQL 与原始返回，额外混合检索自愿展开。 */
+.briefing-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; }
+.briefing-heading h3 { font-size: 32px; font-weight: 400; }
+.briefing-heading > p { color: var(--ink-soft); font-size: 24px; }
+.briefing-findings { margin: 18px 0; padding: 16px 20px; border: 3px solid var(--edge); background: var(--selected); box-shadow: 4px 4px 0 var(--edge); color: var(--ink); font-size: 28px; overflow-wrap: anywhere; }
+.briefing-findings p + p, .briefing-findings li + li { margin-top: 8px; }
+.briefing-findings ul { margin: 0; padding-left: 24px; }
+.briefing-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.briefing-source { min-width: 0; padding: 16px; border: 2px solid var(--edge); background: var(--paper); }
+.briefing-source h4 { margin-bottom: 12px; font-size: 24px; font-weight: 400; }
+.briefing-source .sql-preview { min-height: 160px; border: 2px solid var(--line); font-size: 20px; }
+.briefing-rows { min-width: 0; min-height: 160px; font-size: 24px; overflow-wrap: anywhere; }
+.briefing-rows table, .detail-result-list table, .radar-results table { width: 100%; table-layout: fixed; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.briefing-rows th, .briefing-rows td, .detail-result-list th, .detail-result-list td, .radar-results th, .radar-results td { padding: 8px 10px; border-bottom: 2px solid var(--line); text-align: left; white-space: normal; overflow-wrap: anywhere; font-weight: 400; }
+.briefing-rows th, .detail-result-list th, .radar-results th { background: var(--selected); }
+.detail-search { margin-top: 22px; padding: 4px 18px 14px; border: 2px solid var(--edge); background: var(--paper); }
+.detail-search > summary { color: var(--accent-ink); }
+.detail-search-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 10px 0 14px; }
+/* 追加检索只呈现本关的回波与监听记录，不出现系统下拉框。 */
+.detail-source-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; padding: 16px; border: 3px solid var(--edge); color: var(--ink); background: var(--paper-inset); font-size: 24px; line-height: 1.5; text-align: left; overflow-wrap: anywhere; box-shadow: 3px 3px 0 var(--edge); }
+.detail-source-card > strong { font-size: 24px; font-weight: 400; }
+.detail-card-method { color: var(--accent-ink); font-size: 24px; }
+.detail-card-source { color: var(--muted); font-size: 18px; }
+.detail-card-body { color: var(--ink-soft); font-size: 24px; }
+.detail-source-card[aria-pressed="true"] { border-color: var(--accent-ink); background: var(--selected); box-shadow: inset 0 0 0 3px var(--paper), 4px 4px 0 var(--edge); }
+.detail-source-card:disabled { opacity: .5; }
+.detail-source-card:active:not(:disabled) { transform: translate(1px, 2px); }
+@media (hover: hover) { .detail-source-card:not(:disabled):hover { background: var(--selected-hover); } }
+.detail-search .sql-preview { margin-bottom: 15px; border: 2px solid var(--line); font-size: 20px; }
+.detail-feedback { margin-top: 12px; color: var(--ink-soft); font-size: 24px; }
+.detail-result-list { min-width: 0; margin-top: 12px; font-size: 24px; overflow-wrap: anywhere; }
+.detail-result-list:empty { margin: 0; }
+.executed-detail-sql { border: 2px solid var(--line); }
+.detail-result-list > p, .detail-result-list > div { padding: 12px 0; border-top: 2px dashed var(--line); }
+.detail-result-list > .briefing-source { margin-top:12px; padding:20px 24px; border:2px solid var(--edge); }
+.briefing-actions { margin: 22px 0 10px; }
+/* 代码与原始 JSON 保留全文，长行只换行，不另设滚动容器。 */
+.notebook pre, .notebook code, .battle-log pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 选区画面不出现战术棋盘。 */
+/* Part I：完整航海图自由点位，坐标由真实SQL返回。 */
+.theater-workspace { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(260px, .85fr); align-items: start; gap: 24px; }
+.theater-chart { min-width: 0; }
+.theater-chart .chart-heading h3 { color: var(--ink); font-size: 28px; }
+.theater-frame { padding: 8px; background: var(--paper); }
+.theater-frame #theater-canvas { width: 100%; height: auto; aspect-ratio: 14 / 9; cursor: crosshair; }
+.map-coordinates { margin-top: 14px; padding: 9px 12px; border: 2px solid var(--edge); color: var(--ink); background: var(--paper); font-size: 24px; font-variant-numeric: tabular-nums; }
+.theater-chart #theater-hint { margin-top: 10px; color: var(--ink-soft); font-size: 24px; }
+.sector-panel { padding: 20px; border: 3px solid var(--edge); background: var(--paper); box-shadow: 4px 4px 0 var(--edge); }
+.map-target-readout { color: var(--ink); font-size: 24px; line-height: 1.65; overflow-wrap: anywhere; }
+.map-feedback { margin-top: 16px; padding-top: 14px; border-top: 2px dashed var(--line); color: var(--accent-ink); font-size: 24px; line-height: 1.6; }
+.map-feedback:empty { display: none; }
+.sector-panel #engage-sector { justify-content: center; min-height: 60px; margin-top: 24px; padding-right: 12px; padding-left: 12px; font-size: 24px; }
+#sector-choice, #skip-query { display: none !important; }
+
+/* 双方坐标图常驻，演出与回执独立，交战时只保留战术手册。 */
+body[data-view="battle"] { min-height: 100dvh; background: var(--page); }
+body[data-view="battle"] .header-actions,
+body[data-view="battle"] .flow-guide,
+body[data-view="battle"] #status-message,
+body[data-view="battle"] .view-tabs,
+body[data-view="battle"] .terminal-footer { display: none !important; }
+body[data-view="battle"] .terminal-shell { width: min(1184px, 100%); padding: 24px 32px; }
+body[data-view="battle"] .masthead { grid-template-columns: minmax(0, 1fr); grid-template-areas: "brand" "motto"; justify-items: center; gap: 6px; min-height: 130px; margin-bottom: 24px; }
+body[data-view="battle"] .brand-motto { justify-self: end; }
+/* 交战按用户图稿排为：横向手册、完整双海图、SQL 与最新战报。 */
+body[data-view="battle"] .play-layout,
+body[data-view="battle"] .play-layout:has(> .tactical-sidebar:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "manual manual" "board board" "sql log"; gap: 24px; margin: 0 auto; }
+body[data-view="battle"] .screen-stack { grid-area: board; width: 100%; }
+body[data-view="battle"] .tactical-sidebar { display: contents; }
+body[data-view="battle"] .quick-rule-section { grid-area: manual; display: grid; grid-template-columns: minmax(0, 1fr) 340px; align-items: center; gap: 28px; margin: 0; padding: 20px 24px; border: 3px solid var(--edge); background: var(--paper); box-shadow: 4px 4px 0 var(--edge); }
+body[data-view="battle"] .quick-rule-section h3 { margin-bottom: 8px; font-size: 48px; line-height: 1.25; font-weight: 400; }
+.manual-source-title { display: none; }
+body[data-view="battle"] .manual-source-title { display: block; margin-bottom: 12px; color: var(--accent-ink); font-size: 24px; font-weight: 400; }
+body[data-view="battle"] .tactical-clues { margin: 0; padding: 0; border: 0; }
+body[data-view="battle"] .tactical-clues p,
+body[data-view="battle"] .tactical-clues article,
+body[data-view="battle"] .tactical-clues li { font-size: 24px; line-height: 1.5; }
+body[data-view="battle"] #quick-rule { padding: 12px 0 12px 24px; border-left: 2px dashed var(--line); color: var(--ink); font-size: 24px; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
+body[data-view="battle"] .battle-last-sql,
+body[data-view="battle"] .recent-report-section { min-width: 0; margin: 0; padding: 20px; border: 3px solid var(--edge); background: var(--paper); box-shadow: 4px 4px 0 var(--edge); }
+body[data-view="battle"] .battle-last-sql { grid-area: sql; }
+body[data-view="battle"] .recent-report-section { grid-area: log; }
+body[data-view="battle"] .battle-last-sql h3,
+body[data-view="battle"] .recent-report-section h3 { font-size: 24px; font-weight: 400; }
+body[data-view="battle"] .recent-battle-log,
+body[data-view="battle"] .recent-battle-log > p,
+body[data-view="battle"] .recent-battle-log > div { font-size: 24px; }
+.navy-game-screen { position: relative; width: 100%; margin: 0 auto; border: 8px solid var(--edge); color: var(--ink); background: var(--sea-light); box-shadow: 6px 6px 0 var(--edge); font-family: var(--sans); }
+.navy-boards { display: grid; grid-template-columns: repeat(2, 480px); justify-content: space-between; gap: 24px; padding: 16px 24px 14px; background: var(--paper); }
+.battle-chart { min-width: 0; }
+.battle-chart-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-height: 37px; }
+.battle-chart-heading h3 { font-size: 24px; font-weight: 400; }
+.battle-chart-heading > span { color: var(--ink-soft); font-size: 18px; }
+.navy-lcd, .navy-lcd .enemy-frame { width: 480px; height: 432px; }
+.navy-lcd .enemy-frame, .battle-fleet-slot .fleet-frame { padding: 0; border: 0; background: var(--sea-light); box-shadow: none; }
+.navy-lcd #enemy-board, .battle-fleet-slot #fleet-board { display: block; width: 480px; max-width: none; height: 432px; aspect-ratio: 10 / 9; image-rendering: pixelated; background: var(--sea-light); }
+.battle-fleet-slot { min-height: 432px; }
+.battle-fleet-slot .fleet-station, .battle-fleet-slot .fleet-frame { width: 480px; max-width: none; }
+.battle-fleet-slot .chart-heading { display: none; }
+.battle-chart-caption, .battle-fleet-slot .fleet-caption { min-height: 30px; margin-top: 6px; color: var(--ink-soft); font-size: 20px; line-height: 1.4; overflow-wrap: anywhere; }
+.navy-game-hud { padding: 10px 16px 14px; border-top: 4px solid var(--edge); background: var(--paper); }
+.battle-situation { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+.navy-fleet-readout { flex: 1; min-width: 0; }
+.navy-fleet-readout > summary { min-height: 38px; padding: 4px 0; color: var(--ink); font-size: 24px; line-height: 1.35; }
+.navy-fleet-readout > p { padding: 5px 0 9px; color: var(--ink-soft); font-size: 20px; }
+.enemy-intent { flex: 0 0 auto; margin: 0; padding: 5px 8px; border: 2px solid var(--edge); color: var(--ink); background: var(--selected); font-size: 22px; line-height: 1.35; }
+.enemy-intent[data-shots="2"], .enemy-intent.is-warning { border-color: var(--hit); color: var(--hit); background: var(--warning-paper); }
+.navy-game-screen .attack-console { display: flex; flex-wrap: wrap; align-items: start; gap: 10px 14px; margin: 10px 0 14px; padding: 0; border: 0; }
+.navy-game-screen .attack-actions { display: flex; align-items: center; gap: 10px; margin: 0; }
+.navy-game-screen .button { min-height: 48px; padding: 8px 12px; border: 2px solid var(--edge); color: var(--ink); background: var(--paper); box-shadow: 2px 2px 0 var(--edge); font-size: 24px; line-height: 1.2; }
+.navy-game-screen .button:disabled { opacity: .5; }
+.navy-game-screen .button-fire { min-width: 176px; background: var(--orange); }
+.navy-game-screen .button-quiet { color: var(--ink-soft); background: transparent; box-shadow: none; }
+.navy-menu { flex: 1; min-width: 112px; }
+.navy-subview > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 7px 12px; border: 2px solid var(--edge); color: var(--ink); background: var(--selected); font-size: 24px; list-style: none; box-shadow: 2px 2px 0 var(--edge); }
+.navy-subview > summary::-webkit-details-marker { display: none; }
+.navy-subview[open] > summary { background: var(--edge); color: var(--paper); }
+/* 武器菜单展开在操作区，不遮住坐标图，也不影响我方舰队显隐。 */
+.navy-weapon-content { width: 100%; margin-top: 10px; padding: 14px; border: 2px solid var(--edge); background: var(--paper-inset); }
+.navy-weapon-content h3 { margin-bottom: 12px; font-size: 24px; font-weight: 400; }
+/* 当前武器预览与可直接点击的像素武器列表。 */
+.weapon-preview { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: 14px; padding-bottom: 14px; border-bottom: 2px dashed var(--line); }
+#weapon-icon { display: block; width: 64px; height: 64px; image-rendering: pixelated; background: var(--sea-light); }
+#weapon-description { min-width: 0; color: var(--ink); font-size: 24px; line-height: 1.45; overflow-wrap: anywhere; }
+.navy-weapon-content .selection-hint { color: var(--ink); font-size: 24px; overflow-wrap: anywhere; }
+.navy-weapon-content .weapon-tools label { display: block; color: var(--ink); font-size: 24px; }
+#weapon-choice, .navy-weapon-content .weapon-tools label:has(#weapon-choice) { display: none !important; }
+.weapon-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.weapon-choice-card { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 12px; min-width: 0; min-height: 88px; padding: 10px 12px; border: 3px solid var(--edge); color: var(--ink); background: var(--paper); font-size: 24px; line-height: 1.5; text-align: left; box-shadow: 3px 3px 0 var(--edge); }
+.weapon-choice-card > canvas { display: block; width: 64px; height: 64px; image-rendering: pixelated; }
+.weapon-choice-label { min-width: 0; overflow-wrap: anywhere; }
+.weapon-choice-card[aria-checked="true"] { border-color: var(--accent-ink); background: var(--selected); box-shadow: inset 0 0 0 3px var(--paper), 4px 4px 0 var(--edge); }
+.weapon-choice-card:disabled { opacity: .5; }
+.weapon-choice-card:active:not(:disabled) { transform: translate(1px, 2px); }
+@media (hover: hover) { .weapon-choice-card:not(:disabled):hover { background: var(--selected-hover); } }
+.navy-weapon-content .weapon-tools .button { min-height: 42px; font-size: 20px; }
+.battle-animation-label { min-height: 43px; padding: 6px 16px; border-bottom: 4px solid var(--edge); color: var(--ink); background: var(--selected); font-size: 24px; line-height: 1.3; }
+.battle-receipts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; padding-top: 12px; border-top: 2px dashed var(--line); }
+.battle-receipts > p { min-width: 0; color: var(--ink-soft); font-size: 22px; line-height: 1.45; overflow-wrap: anywhere; }
+.battle-receipts > .impact-readout { grid-column: 1 / -1; padding: 10px 12px; border: 2px solid var(--edge); color: var(--ink); background: var(--warning-paper); font-size: 24px; }
+.radar-report { margin-top: 14px; padding: 12px; border: 2px solid var(--edge); background: var(--paper-inset); }
+.radar-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 5px 14px; }
+.radar-heading h3 { color: var(--accent-ink); font-size: 24px; font-weight: 400; }
+.radar-legend { color: var(--accent-ink); font-size: 20px; }
+#radar-summary { margin-top: 5px; color: var(--ink); font-size: 22px; line-height: 1.45; overflow-wrap: anywhere; }
+.radar-details > summary { min-height: 36px; margin-top: 3px; padding: 5px 0; color: var(--ink-soft); font-size: 20px; }
+.radar-results { min-width: 0; max-width: 100%; font-size: 20px; overflow-wrap: anywhere; }
+#radar-sql { margin-top: 12px; border: 2px solid var(--line); font-size: 20px; }
+.shot-history-panel { margin-bottom: 20px; }
+.shot-history-panel h3 { margin-bottom: 12px; font-size: 24px; }
+.shot-history { display: flex; flex-wrap: wrap; gap: 8px; color: var(--ink-soft); font-size: 24px; }
+.shot-history > span, .shot-history > div { padding: 5px 8px; border: 2px solid var(--line); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 16px; font-size: 20px; }
+.battle-last-sql { margin-top: 16px; border-top: 2px solid var(--line); }
+.battle-last-sql > summary { color: var(--ink-soft); font-size: 18px; }
+#last-executed-sql { border: 2px solid var(--line); font-size: 20px; }
+@media (hover: hover) { .navy-game-screen .button:not(:disabled):hover { color: var(--ink); background: var(--paper); border-color: var(--edge); } }
+.records-panel { margin-top: 25px; padding-top: 20px; border-top: 2px solid var(--edge); }.records-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px; }.records-layout h3 { margin-bottom: 12px; font-size: 28px; font-weight: 400; }.battle-log, .notebook { min-width: 0; color: var(--ink-soft); font-size: 24px; overflow-wrap: anywhere; }.battle-log > div, .battle-log > p, .notebook > div, .notebook > article { padding: 10px 0; border-bottom: 2px solid var(--line); font-size: 24px; }.battle-log time, .log-turn { margin-right: 12px; color: var(--accent-text); }.notebook strong, .notebook h4 { color: var(--ink); font-size: 24px; }.notebook p { margin-top: 5px; }.notebook code { color: var(--accent-ink); font-size: 20px; }.record-tools { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+
+/* 结算与手册。 */
+/* 只有胜利有待领取战利品时展示，全部奖励直接排开。 */
+.reward-station { margin-top: 24px; padding-top: 20px; border-top: 3px solid var(--edge); }
+.reward-station:has(> .reward-gallery[hidden]) { display: none; }
+.reward-heading { margin-bottom: 16px; color: var(--hit); font-size: 28px; font-weight: 400; }
+.reward-gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+.reward-card { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 14px; min-width: 0; padding: 16px; border: 3px solid var(--edge); color: var(--ink); background: var(--selected); box-shadow: 4px 4px 0 var(--edge); }
+.reward-gallery canvas { display: block; width: 64px; height: 64px; image-rendering: pixelated; }
+.reward-card h4, .reward-card h5, .reward-card strong { display: block; margin: 0 0 7px; line-height: 1.35; color: var(--ink); font-size: 26px; font-weight: 400; overflow-wrap: anywhere; }
+.reward-card p { color: var(--ink-soft); font-size: 24px; line-height: 1.5; overflow-wrap: anywhere; }
+.reward-type { display: block; margin-bottom: 5px; color: var(--accent-ink); font-size: 18px; }
+.reward-feedback { margin-top: 14px; color: var(--ink-soft); font-size: 24px; line-height: 1.5; overflow-wrap: anywhere; }
+
+.result-panel { max-width: 940px; margin: 22px auto; padding: 30px 34px; border: 2px solid var(--orange); background: var(--paper); }.result-panel h3 { margin-top: 12px; font-size: 36px; font-weight: 400; }.result-panel > p:not(.screen-kicker) { margin-top: 17px; color: var(--ink-soft); font-size: 26px; line-height: 1.75; }.result-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 25px; }
+.terminal-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 18px; margin-top: 27px; padding: 15px 0 20px; border-top: 2px solid var(--line); color: var(--muted); font-size: 20px; }.terminal-footer > span { display: inline-flex; align-items: center; gap: 8px; }.terminal-footer i { display: block; width: 5px; height: 5px; background: var(--orange); }.terminal-footer p { font-size: 20px; }
+.help-dialog { width: min(820px, calc(100% - 32px)); max-height: calc(100dvh - 48px); margin: auto; padding: 25px 30px; border: 2px solid var(--orange); color: var(--ink); background: var(--page); box-shadow: 0 0 0 4px var(--page), 0 0 0 5px var(--edge); overflow: auto; overscroll-behavior: contain; }.help-dialog::backdrop { background: var(--scrim); }.dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 15px; }.dialog-heading h2 { font-size: 34px; font-weight: 400; }.help-steps { display: grid; gap: 23px; margin-top: 25px; padding-left: 24px; }.help-steps li { padding-left: 5px; }.help-steps strong { color: var(--accent-ink); font-size: 26px; font-weight: 400; }.help-steps p { margin-top: 7px; color: var(--ink-soft); font-size: 24px; line-height: 1.75; }.help-keyboard { margin-top: 23px; padding-top: 16px; border-top: 2px solid var(--edge); color: var(--muted); font-size: 24px; }
+
+/* 步骤切换与右侧短战报。 */
+.view-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 0 4px; }
+.view-tabs .view-tab { min-width: 160px; min-height: 58px; padding: 10px 20px; background: var(--paper); box-shadow: 3px 3px 0 var(--edge); }
+.view-tabs .view-tab.active, .view-tabs .view-tab[aria-current="step"], .view-tabs .view-tab[aria-selected="true"] { border-color: var(--ink); background: var(--selected); color: var(--ink); box-shadow: 3px 3px 0 var(--ink); }
+.view-tabs .view-deploy { margin-left: auto; background: var(--paper); }
+.play-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+.play-layout:has(> .tactical-sidebar:not([hidden])) { grid-template-columns: minmax(0, 1fr) 250px; }
+.screen-stack { min-width: 0; }
+.tactical-sidebar { padding: 16px; border: 3px solid var(--edge); background: var(--paper); box-shadow: 4px 4px 0 var(--edge); }
+.tactical-sidebar h3 { margin-bottom: 12px; color: var(--ink); font-size: 26px; }
+.recent-battle-log { display: grid; gap: 12px; color: var(--ink-soft); font-size: 20px; line-height: 1.55; }
+.recent-battle-log > p, .recent-battle-log > div { padding-bottom: 10px; border-bottom: 2px dashed var(--line); font-size: 20px; }
+.tactical-sidebar .records-toggle { width: 100%; min-height: 46px; margin-top: 9px; padding: 7px 0; font-size: 18px; }
+.quick-rule-section { margin-top: 20px; }
+.quick-rule-section > p { color: var(--ink-soft); font-size: 20px; line-height: 1.6; }
+.tactical-sidebar > .quick-rule-section:first-child { margin-top: 0; }
+.tactical-clues { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 2px dashed var(--line); overflow-wrap: anywhere; }
+.tactical-clues .clue-summary, .tactical-clues > p:first-child { color: var(--ink); font-size: 24px; line-height: 1.5; }
+.tactical-clues > p, .tactical-clues > article, .tactical-clues > div, .tactical-clues li { margin-top: 10px; color: var(--ink-soft); font-size: 22px; line-height: 1.5; }
+.tactical-clues > :first-child { margin-top: 0; }
+.tactical-clues small, .tactical-clues .clue-source { display: block; margin-top: 5px; color: var(--muted); font-size: 18px; line-height: 1.45; }
+.tactical-clues ul, .tactical-clues ol { margin: 8px 0 0; padding-left: 22px; }
+.recent-report-section { margin-top: 22px; }
+.deployment-note { margin-bottom: 18px; color: var(--muted); font-size: 20px; }
+.records-panel { padding: 22px; border: 3px solid var(--edge); background: var(--paper); }
+strong, b { font-weight: 400; }
+.button { box-shadow: 3px 3px 0 var(--edge); }
+.button-quiet { box-shadow: none; }
+.button-primary { color: var(--ink); border: 3px solid var(--ink); background: var(--orange); box-shadow: 4px 4px 0 var(--ink); }
+.button-secondary { background: var(--paper); }
+.chart-frame { border: 3px solid var(--edge); box-shadow: 4px 4px 0 var(--edge); }
+.chart-corner { border-width: 4px; }
+.flow-guide { padding-top: 14px; padding-bottom: 12px; }
+body[data-view="welcome"] .flow-guide > p:last-child,
+body[data-view="welcome"] #status-message,
+body[data-view="welcome"] .campaign-details,
+body[data-view="welcome"] .terminal-footer,
+body[data-view="tutorial"] .flow-guide,
+body[data-view="tutorial"] #status-message,
+body[data-view="tutorial"] .campaign-details,
+body[data-view="tutorial"] .terminal-footer { display: none; }
+@media (hover: hover) { .button-primary:not(:disabled):hover { border-color: var(--ink); color: var(--ink); background: var(--paper); }.view-tab:not(:disabled):hover { background: var(--selected); } }
+@media (max-width: 1100px) {
+  .terminal-shell { padding-right: 22px; padding-left: 22px; }
+  .masthead { grid-template-columns: minmax(0, 1fr); grid-template-areas: "brand" "actions" "motto"; gap: 8px; }
+  .header-actions { justify-self: start; }
+  .play-layout:has(> .tactical-sidebar:not([hidden])) { grid-template-columns: minmax(0, 1fr) 225px; gap: 18px; }
+  .header-actions { gap: 5px; }
+  .view-tabs .view-tab { min-width: 140px; padding-right: 14px; padding-left: 14px; }
+  .deploy-layout, .theater-workspace { grid-template-columns: minmax(0, 1fr); gap: 25px; }
+  .battle-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .battle-sidebar { padding-top: 18px; border-top: 2px solid var(--edge); }
+  .records-layout { grid-template-columns: 1fr; }
+}
+@media (max-width: 800px) {
+  .terminal-shell { padding-right: 18px; padding-left: 18px; }
+  .masthead { gap: 10px; padding: 10px 12px; }
+  .brand h1 { gap: 14px; }
+  .brand-logo { width: 216px; height: 51px; }
+  .brand-game-title { font-size: 48px; }
+  .header-actions { width: 100%; justify-content: flex-start; }
+  .header-actions .button, .campaign-details > summary { padding: 8px 10px; font-size: 20px; }
+  .campaign-readout { right: auto; left: 0; }
+  .flow-guide { grid-template-columns: 1fr; gap: 7px; }
+  .flow-guide h2 { font-size: 36px; }
+  .flow-guide > p:last-child { grid-column: 1; font-size: 28px; }
+  .play-layout:has(> .tactical-sidebar:not([hidden])) { grid-template-columns: 1fr; }
+  .tactical-sidebar { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .quick-rule-section { margin-top: 0; }
+  .evidence-list { grid-template-columns: 1fr; }
+  .ability-list { grid-template-columns: 1fr; }
+  .theater-workspace { grid-template-columns: 1fr; }
+  .deploy-layout { grid-template-columns: 1fr; gap: 26px; }
+  .deploy-slot .fleet-station { margin-right: auto; margin-left: auto; }
+  .battle-layout { grid-template-columns: 1fr; gap: 24px; }
+  .battle-sidebar { padding-top: 20px; border-top: 2px solid var(--edge); }
+  .attack-actions .button, .query-actions .button { width: 100%; }
+  .welcome-simple, .tutorial-card { margin: 12px auto 25px; padding: 26px; }
+  .terminal-footer { margin-top: 23px; }
+}
+@media (max-width: 600px) {
+  .terminal-shell { padding-right: 16px; padding-left: 16px; }
+  .brand h1 { gap: 12px; }
+  .brand-logo { width: 144px; height: 34px; }
+  .brand-game-title { font-size: 36px; }
+  .brand-motto { max-width: 100%; }
+  body[data-view="battle"] .masthead { min-height: 0; margin-bottom: 20px; }
+  .header-actions { gap: 4px; }
+  .header-actions .button, .campaign-details > summary { min-height: 44px; font-size: 18px; }
+  .view-tabs { gap: 8px; }
+  .view-tabs .view-tab { flex: 1 1 0; min-width: 0; padding: 9px 4px; font-size: 24px; }
+  .view-tabs .view-deploy { width: 100%; margin-left: 0; font-size: 24px; }
+  .flow-guide h2 { font-size: 36px; }
+  .flow-status { font-size: 20px; }
+  .status-message { padding: 10px 12px; font-size: 20px; }
+  .welcome-simple, .tutorial-card { padding: 22px; }
+  .welcome-one-line { font-size: 28px; }
+  .welcome-simple > .button { width: 100%; padding-right: 12px; padding-left: 12px; font-size: 26px; }
+  .welcome-simple .engine-readout { margin-top: 24px; }
+  #engine-status { font-size: 20px; }
+  .engine-readout { grid-template-columns: 7px minmax(0, 1fr); }
+  .seed-controls { flex-wrap: wrap; }
+  .seed-controls .button { width: 100%; }
+  .tutorial-card h3 { font-size: 36px; }
+  .tutorial-card > p:not(.screen-kicker) { font-size: 28px; }
+  .tutorial-card > .button { width: 100%; font-size: 28px; }
+  .ship-list { grid-template-columns: 1fr; }
+  .fleet-button-row { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: stretch; }
+  .fleet-button-row > .button { width: 100%; min-width: 0; padding-right: 8px; padding-left: 8px; }
+  .evidence-item { padding: 14px; }
+  .sql-preview, #last-executed-sql, .executed-detail-sql { padding: 12px; font-size: 20px; }
+  .sector-panel { padding: 18px; }
+  .chart-legend { font-size: 20px; }
+  .enemy-frame { max-width: 100%; }
+  .enemy-frame #enemy-board { max-width: 100%; }
+  .battle-utility { display: grid; grid-template-columns: 1fr; }
+  .battle-utility .button { width: 100%; }
+  .selection-hint select { width: 100%; }
+  .tactical-sidebar { grid-template-columns: 1fr; gap: 0; }
+  .quick-rule-section { margin-top: 18px; }
+  .result-panel { margin: 10px auto; padding: 23px 20px; }
+  .reward-gallery { grid-template-columns: minmax(0, 1fr); }
+  .reward-card { gap: 12px; padding: 13px; }
+  #confirm-rewards { width: 100%; }
+  .result-actions > .button { width: 100%; }
+  .help-dialog { padding: 20px; }
+  .dialog-heading { align-items: flex-start; flex-wrap: wrap; }
+  .dialog-heading h2 { font-size: 32px; }
+  .help-steps { padding-left: 22px; }
+  .help-keyboard, .help-steps p { font-size: 24px; }
+}
+/* 两海图始终使用整数倍像素；窄屏改纵向，只让整页滚动。 */
+@media (max-width: 1170px) {
+  body[data-view="battle"] .terminal-shell { width: min(800px, 100%); padding: 16px; }
+  .navy-boards { grid-template-columns: repeat(2, 320px); gap: 16px; padding: 12px 16px; }
+  .navy-lcd, .navy-lcd .enemy-frame { width: 320px; height: 288px; }
+  .navy-lcd #enemy-board, .battle-fleet-slot #fleet-board { width: 320px; height: 288px; }
+  .battle-fleet-slot { min-height: 288px; }
+  .battle-fleet-slot .fleet-station, .battle-fleet-slot .fleet-frame { width: 320px; }
+  body[data-view="battle"] .quick-rule-section { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  body[data-view="battle"] #quick-rule { padding: 12px 0 0; border-left: 0; border-top: 2px dashed var(--line); }
+}
+@media (max-width: 760px) {
+  html { scroll-padding-top: 220px; }
+  body[data-view="battle"] .terminal-shell { width: min(368px, 100%); padding: 16px 8px; }
+  body[data-view="battle"] .play-layout,
+  body[data-view="battle"] .play-layout:has(> .tactical-sidebar:not([hidden])) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "manual" "board" "sql" "log"; gap: 22px; }
+  body[data-view="battle"] .quick-rule-section,
+  body[data-view="battle"] .battle-last-sql,
+  body[data-view="battle"] .recent-report-section { padding: 16px; }
+  body[data-view="battle"] .quick-rule-section h3 { font-size: 36px; }
+  .navy-game-screen { width: 336px; }
+  .navy-boards { grid-template-columns: 320px; gap: 14px; padding: 10px 0; }
+  .battle-chart-heading { padding: 0 8px; }
+  .battle-chart-caption, .battle-fleet-slot .fleet-caption { padding: 0 8px; }
+  .enemy-chart { padding-top: 10px; border-top: 2px solid var(--edge); }
+  .navy-game-hud { padding: 10px 8px 12px; }
+  .battle-situation { flex-direction: column; gap: 6px; }
+  .navy-fleet-readout > summary { font-size: 24px; }
+  .enemy-intent { font-size: 24px; }
+  .navy-game-screen .attack-console { display: block; }
+  .navy-game-screen .attack-actions { justify-content: space-between; gap: 6px; }
+  .navy-game-screen .attack-actions .button { width: auto; min-width: 0; padding: 9px 8px; font-size: 24px; }
+  .navy-menu { margin-top: 12px; }
+  .navy-weapon-content { padding: 12px; }
+  .weapon-choices { grid-template-columns: minmax(0, 1fr); }
+  .weapon-choice-card { grid-template-columns: 48px minmax(0, 1fr); padding: 10px; gap: 10px; }
+  .weapon-choice-card > canvas { width: 32px; height: 32px; justify-self: center; }
+  .battle-animation-label { padding-right: 8px; padding-left: 8px; }
+  .battle-receipts { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .radar-report { padding: 10px; }
+  .radar-heading { display: block; }
+  .radar-legend { display: block; margin-top: 5px; }
+}
+@media (max-width: 800px) {
+  .briefing-overview { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .deploy-slot .fleet-frame { width: 336px; padding: 5px; }
+  .deploy-slot #fleet-board { width: 320px; max-width: 100%; height: 288px; }
+  .deployment-instructions h3, .briefing-heading h3 { font-size: 32px; }
+  .deployment-instructions ol { display: grid; grid-template-columns: 1fr 1fr; }
+  .deployment-instructions li { padding: 8px; font-size: 22px; }
+  .briefing-findings { padding: 14px; font-size: 26px; }
+  .briefing-source { padding: 12px; }
+  .briefing-source .sql-preview { padding: 10px; font-size: 20px; }
+  .detail-search { padding-right: 12px; padding-left: 12px; }
+  .detail-search-controls { grid-template-columns: minmax(0, 1fr); }
+  .detail-search .button, .briefing-actions .button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* 玩家标记与公开规则分别说明，不冒充炮击结果或SQL线索。 */
+.spacing-battle-reminder { grid-column: 1 / -1; border-top: 2px dashed var(--line); padding-top: 12px; font-size: 24px; line-height: 1.5; }
+.map-mark-tools { margin-top: 12px; padding: 12px 16px; border-top: 2px dashed var(--line); font-size: 24px; }
+.map-mark-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.map-mark-buttons .button { font-size: 24px; }
+.tactical-support { display: grid; gap: 10px; margin: 12px 0; }
+
+/* 两套完整组合与查询排除状态；仅使用最外层页面滚动。 */
+.evidence-item.rejected,.detail-source-card.rejected { border-style:dashed; background:var(--paper-inset); opacity:.6; }
+.evidence-item.rejected strong,.detail-source-card.rejected strong { text-decoration:line-through; }
+.reward-feature-title { margin:16px 0 6px; font-size:24px; font-weight:400; color:var(--accent-ink); }
+.reward-feature { font-size:24px; line-height:1.6; }
+.reward-feature-link { display:inline-block; margin-top:8px; color:var(--accent-ink); font-size:20px; text-underline-offset:4px; }
+
+/* 舰队、武器与雷达结果常驻展开，使用普通章节而非折叠控件。 */
+.navy-fleet-readout > h4 { margin:0; min-height:38px; padding:4px 0; color:var(--ink); font-size:24px; line-height:1.35; font-weight:400; }
+.radar-details > h4 { margin:8px 0; color:var(--ink-soft); font-size:22px; line-height:1.5; font-weight:400; }
+.navy-game-screen .navy-menu { flex-basis:100%; }
+@media (min-width:761px) { .weapon-choices { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+
+/* 任务目标提供明确判断条件，资料选项按检索方式分组。 */
+.task-objective { margin:16px 0 24px; padding:20px 24px; border:3px solid var(--edge); border-left:8px solid var(--accent-ink); background:var(--selected); }
+.task-objective > h3 { margin:0 0 12px; color:var(--ink); font-size:36px; font-weight:400; line-height:1.3; }
+.task-objective > p,#mission-objective,#detail-match-objective { margin:0; color:var(--ink); font-size:28px; line-height:1.65; white-space:pre-line; overflow-wrap:anywhere; }
+.evidence-list { display:block; }
+.retrieval-group { margin:20px 0; min-width:0; }
+.retrieval-group-title { margin:0 0 10px; font-size:28px; font-weight:400; color:var(--ink); line-height:1.5; }
+.retrieval-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.evidence-acquisition { display:block; margin-top:12px; color:var(--ink-soft); font-size:20px; line-height:1.6; overflow-wrap:anywhere; }
+.detail-choice-groups .retrieval-pair { grid-template-columns:minmax(0,1fr); }
+.detail-choice-groups { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.detail-source-card[aria-pressed="true"] { border-color:var(--accent-ink); background:var(--selected); }
+@media (max-width:760px) { .task-objective { padding:16px; }.task-objective > h3 { font-size:32px; }.task-objective > p,#mission-objective,#detail-match-objective { font-size:24px; }.retrieval-pair,.detail-choice-groups { grid-template-columns:minmax(0,1fr); } }
+
+/* 电脑作战界面：双海图左置，武器常驻右侧，参考红警的指令栏分工。 */
+body[data-view="battle"] .terminal-shell { width:min(1600px,100%); padding:24px 32px; }
+body[data-view="battle"] .navy-game-screen { display:grid; grid-template-columns:minmax(0,1fr) 320px; grid-template-rows:auto auto auto; width:100%; align-items:start; background:var(--paper); }
+body[data-view="battle"] .battle-animation-label { grid-column:1/-1; margin:0; }
+body[data-view="battle"] .navy-boards { grid-column:1; grid-row:2; grid-template-columns:repeat(2,480px); justify-content:center; gap:24px; padding:16px; min-width:0; }
+body[data-view="battle"] .navy-game-hud { grid-column:1; grid-row:3; min-width:0; padding:12px 16px 16px; }
+body[data-view="battle"] .weapon-sidebar { grid-column:2; grid-row:2/4; align-self:stretch; min-width:0; border-left:4px solid var(--edge); background:var(--paper-inset); }
+.weapon-sidebar .navy-menu { display:block; min-width:0; margin:0; }
+.weapon-sidebar .navy-weapon-content { margin:0; padding:12px; border:0; background:transparent; }
+.weapon-sidebar #weapons-title { margin:-12px -12px 14px; padding:12px 14px; color:var(--paper); background:var(--edge); font-size:28px; line-height:1.3; }
+.weapon-sidebar .weapon-preview { grid-template-columns:64px minmax(0,1fr); gap:10px; margin-bottom:12px; padding-bottom:12px; align-items:start; }
+.weapon-sidebar #weapon-description { font-size:24px; line-height:1.5; }
+.weapon-sidebar .weapon-choices { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:12px 0; }
+.weapon-sidebar .weapon-choice-card { grid-template-columns:minmax(0,1fr); justify-items:center; align-content:start; min-height:128px; padding:10px 6px; gap:8px; font-size:24px; line-height:1.35; text-align:center; }
+.weapon-sidebar .weapon-choice-card > canvas { width:32px; height:32px; }
+.weapon-sidebar .selection-hint { padding-top:12px; border-top:2px dashed var(--line); font-size:24px; }
+.tutorial-actions { display:flex; flex-wrap:wrap; gap:14px; align-items:center; justify-content:space-between; margin-top:28px; }
+.tutorial-actions .button { min-height:64px; font-size:28px; }
+@media (max-width:1419px) {
+ body[data-view="battle"] .navy-boards { grid-template-columns:repeat(2,320px); }
+ body[data-view="battle"] .navy-lcd,body[data-view="battle"] .navy-lcd .enemy-frame { width:320px; height:288px; }
+ body[data-view="battle"] .navy-lcd #enemy-board,body[data-view="battle"] .battle-fleet-slot #fleet-board { width:320px; height:288px; }
+ body[data-view="battle"] .battle-fleet-slot { min-height:288px; }
+ body[data-view="battle"] .battle-fleet-slot .fleet-station,body[data-view="battle"] .battle-fleet-slot .fleet-frame { width:320px; }
+}
+@media (max-width:1119px) { body[data-view="battle"] .navy-boards { grid-template-columns:320px; } }
+
+/* 名称与库存各占一段，长武器名仍保持大字与完整显示。 */
+.weapon-choice-name,.weapon-choice-stock { display:block; }
+.weapon-choice-stock { margin-top:6px; }
+.weapon-sidebar .selection-hint { margin-bottom:12px; padding:8px 0 12px; border-top:0; border-bottom:2px dashed var(--line); }
+
+/* 标记与发射合并为同一操作区；保留标记不消耗行动的说明。 */
+body[data-view="battle"] .navy-game-screen .attack-console { display:flex; align-items:flex-end; flex-wrap:wrap; gap:14px 24px; margin:12px 0; }
+body[data-view="battle"] .attack-console .map-mark-tools { flex:1 1 400px; min-width:0; margin:0; padding:0; border:0; }
+body[data-view="battle"] .attack-console .map-mark-tools > p { margin:0 0 8px; }
+body[data-view="battle"] .attack-console .map-mark-buttons { justify-content:flex-start; }
+
+/* 开火与标记同区：左侧舰队/开火，右侧标记，中间竖向虚线。 */
+body[data-view="battle"] .battle-command-area { display:grid; grid-template-columns:minmax(280px,1fr) minmax(360px,1.2fr) max-content; grid-template-rows:auto auto; column-gap:16px; row-gap:10px; align-items:start; margin:0 0 16px; }
+body[data-view="battle"] .battle-command-area .battle-situation,body[data-view="battle"] .battle-command-area .attack-console { display:contents; }
+.battle-command-area .navy-fleet-readout { grid-column:1; grid-row:1; }
+.battle-command-area .attack-actions { grid-column:1; grid-row:2; align-self:end; }
+body[data-view="battle"] .battle-command-area .map-mark-tools { grid-column:2; grid-row:1/3; align-self:stretch; display:flex; flex-direction:column; justify-content:space-between; border-left:2px dashed var(--line); padding:0 0 0 18px; margin:0; min-width:0; }
+.battle-command-area .enemy-intent { grid-column:3; grid-row:1/3; }
+@media (max-width:1319px) {
+ body[data-view="battle"] .battle-command-area { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+ .battle-command-area .enemy-intent { grid-column:2; grid-row:3; justify-self:end; }
+}
