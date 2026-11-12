@@ -223,7 +223,7 @@ def build(output, manifest_path, cache, webkit_cache=None):
     html = once(html, '<link rel="stylesheet" href="./游戏样式.css">', '<style>\n' + css + '\n</style>', '游戏.html', '内联CSS与像素字体')
     html = once(html, 'src="./assets/branding/seekdb-logo.png"', 'src="' + logo_url + '"', '游戏.html', '内联页脚logo')
     attribution = []
-    for name in ['engine/LICENSE', 'engine/NOTICE', 'engine/来源.json', 'engine/public-third-party.json', 'assets/字体许可证.txt', 'assets/字体来源.json', '离线启动器/LICENSE-Go.txt']:
+    for name in ['engine/LICENSE', 'engine/NOTICE', 'engine/来源.json', 'engine/public-third-party.json', 'engine/OPFS日志兼容修改.json', 'assets/字体许可证.txt', 'assets/字体来源.json', '离线启动器/LICENSE-Go.txt']:
         attribution.append({'path': name, 'text': read(name).decode('utf-8')})
     entry_script = '<script type="module" src="./游戏逻辑.mjs"></script>'
     if html.count(entry_script) != 1:
@@ -242,8 +242,9 @@ def build(output, manifest_path, cache, webkit_cache=None):
                 'sources': sources, 'packagedPatches': patches, 'attribution': attribution,
                 'requirements': ['现代桌面Chrome、Edge、Safari或Firefox，实际支持以QA结果为准',
                                  'localhost HTTP或HTTPS', 'COOP: same-origin', 'COEP: require-corp',
-                                 'SharedArrayBuffer与WebAssembly线程', 'DecompressionStream(gzip)', 'crypto.subtle SHA-256'],
-                'notes': ['所有SQL仍由原seekdb WASM执行；内存模式，不演示集群。',
+                                 'SharedArrayBuffer与WebAssembly线程', 'OPFS与同步文件访问句柄',
+                                 'DecompressionStream(gzip)', 'crypto.subtle SHA-256'],
+                'notes': ['所有SQL由真实seekdb WASM执行；整局数据使用OPFS持久化，不演示集群。',
                           '双引擎均gzip内嵌，按正式vendor逻辑只解压及校验所需构建；不引入polyfill。',
                           '资源无需外网；Blob模块保留至页面关闭，外部官网链接仅由用户主动点击。']}
     node_binary = shutil.which('node')

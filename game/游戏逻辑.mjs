@@ -9,6 +9,9 @@ import {ICON_SIZE, drawPixelIcon, getLevelRewards, WEAPON_INFO} from './像素�
 import {createDetailEvidence, buildDetailQuery, isTacticalClueKind} from './细节检索.mjs';
 import {checkRecon, canUseFork, chartColumn, canEnterSea, FORK_DESCRIPTION} from './作战流程.mjs';
 import {DynamicTableResources} from './资源清理.mjs';
+import {NavalArchive, makeGameDatabaseName, isGameDatabaseName} from './航海存档.mjs';
+import {persistentWrite} from './持久写入.mjs';
+import {setupBattleFit} from './战斗适配.mjs';
 import {LEVELS, ROUND_LIMITS, createRng, createFleet, validateFleet, applyShot, createKnowledge,
   recordShot, chooseEnemyShots, generateEvidence, buildQuery, validateSalvo, sectorBounds, boundsFromCells, resolveAim, weaponPatternAtAnchor, enemyFirePlan, createEnemyFleet, placementBlockedCells} from './海战规则.mjs';
 
@@ -72,6 +75,18 @@ let notes = [];
 let view = 'welcome';
 let tutorialIndex = 0;
 let recordsOpen = false;
+let archive;
+let battleFit;
+let gameDatabase = null;
+let restartRequested = false;
+let recoveringAction = false;
+let saveBlocked = false;
+let resetInProgress = false;
+let resetIntent = null;
+let uiSaveTimer;
+let finishAnimation = () => {};
+let businessSql = [];
+let maintenanceRevision = 0;
 const tableResources = new DynamicTableResources();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -104,6 +119,8 @@ async function createDynamicTable(name, sql, parent = null) {
 }
 
 async function cleanupDynamicTables() {
+  // OPFS 中保留整局的分支和历史，只在明确重开新游戏时删除整局数据库。
+  if (gameDatabase) return;
   await tableResources.cleanup({
     keep: [campaign?.notesTable, tableNames?.live, tableNames?.checkpoint, tableNames?.notes],
     drop: name => db.exec(`DROP TABLE IF EXISTS \`${name}\``),
@@ -111,15 +128,176 @@ async function cleanupDynamicTables() {
   });
 }
 
-async function operation(work) {
+function saveStatus(text, error = false) {
+  $('save-status').textContent = text;
+  $('save-status').dataset.tone = error ? 'error' : 'saved';
+  $('save-database').textContent = gameDatabase ? `opfs://${gameDatabase}` : '每局使用独立 seekdb 数据库';
+}
+
+function archivePayload() {
+  return clone({version:1, campaign, state, deal, detailEvidence, detailSelection, serial, tableNames,
+    cards:[...cards], abilities:[...abilities], targets, selectedShip, deploySerial, noteSerial,
+    queryMetrics, logs, notes, view, tutorialIndex, recordsOpen, resources:tableResources.entries(),
+    ui:{shrinkEnabled:$('shrink-toggle').checked,seed:$('new-seed').value,fitMode:document.body.dataset.battleFitMode||'fit',
+      resultTitle:$('result-title').textContent,resultCopy:$('result-copy').textContent,
+      resultAction:$('next-level').textContent,resultVisible:!$('result-panel').hidden},
+    lifecycle:{sql:$('database-lifecycle-sql').textContent,result:$('database-lifecycle-result').textContent}});
+}
+
+function restorePayload(payload) {
+  if (payload?.version !== 1 || !payload.campaign || !payload.state?.enemy?.ships || !payload.state?.player?.ships
+    || !Number.isInteger(payload.campaign.level) || payload.campaign.level < 1 || payload.campaign.level > 6) {
+    throw new Error('航海日志格式不匹配，原存档已保留；请重试或明确选择重开新游戏。');
+  }
+  ({campaign,state,deal,detailEvidence,detailSelection,serial,tableNames,targets,selectedShip,deploySerial,noteSerial,
+    queryMetrics,logs,notes,view,tutorialIndex,recordsOpen}=clone(payload));
+  cards=new Set(payload.cards);abilities=new Set(payload.abilities);tableResources.restore(payload.resources);
+  if(state.activeSector)state.knowledge=state.sectorKnowledge[state.activeSector];
+  $('shrink-toggle').checked=payload.ui.shrinkEnabled;$('new-seed').value=payload.ui.seed;
+  battleFit?.setMode(payload.ui.fitMode||'fit');
+  $('result-title').textContent=payload.ui.resultTitle;$('result-copy').textContent=payload.ui.resultCopy;
+  $('next-level').textContent=payload.ui.resultAction;$('result-panel').hidden=!payload.ui.resultVisible;
+  $('database-lifecycle-sql').textContent=payload.lifecycle?.sql||'';
+  $('database-lifecycle-result').textContent=payload.lifecycle?.result||'';
+  $('database-lifecycle').hidden=!payload.lifecycle?.sql;
+  fx=null;
+}
+
+async function persistArchive(label='自动存档', pending=null) {
+  if(!archive||!gameDatabase||!campaign)return;
+  saveStatus('OPFS · 正在保存航海日志…');
+  const sql=businessSql;businessSql=[];
+  const payload=archivePayload();
+  try {
+    await persistentWrite(db,()=>archive.save(gameDatabase,payload,{pending,label,sql}),{
+      onRetry:()=>saveStatus(restartRequested?'正在整理数据库，然后重开…':'OPFS · 正在整理并保存航海日志…'),
+    });
+    saveStatus(`OPFS · 已保存 · 第${campaign.level}关 / 第${state.round}回合`);
+  } catch(error) {
+    businessSql.unshift(...sql);saveBlocked=true;saveStatus('存档失败 · 请重试，原档保留',true);throw error;
+  }
+}
+
+function scheduleUISave() {
+  if(!db||!campaign||saveBlocked||restartRequested)return;
+  clearTimeout(uiSaveTimer);
+  uiSaveTimer=setTimeout(()=>{
+    if(busy){scheduleUISave();return;}
+    void operation(async()=>{},'保存选择');
+  },250);
+}
+
+function showDatabaseSql(statements,result) {
+  $('database-lifecycle').hidden=false;
+  $('database-lifecycle-title').textContent='本局数据库 · 实际执行的 SQL';
+  $('database-lifecycle-sql').textContent=statements.join('\n');
+  $('database-lifecycle-result').textContent=result;
+}
+
+async function replaceGameDatabase(reset=resetIntent) {
+  view='restarting';render();
+  const oldDatabase=reset?reset.oldDatabase:gameDatabase;
+  const next=reset?.newDatabase??makeGameDatabaseName(Date.now(),oldDatabase||'');
+  if(!isGameDatabaseName(next)||(oldDatabase&&!isGameDatabaseName(oldDatabase)))throw new Error('数据库名称不合法，未执行删除。');
+  await persistentWrite(db,()=>archive.beginReset(oldDatabase,next),{onRetry:()=>saveStatus('正在整理数据库，准备创建新局…')});
+  resetInProgress=true;resetIntent={oldDatabase,newDatabase:next};
+  const statements=[];
+  if(oldDatabase){
+    const sql=`DROP DATABASE IF EXISTS \`${oldDatabase}\`;`;
+    statements.push(sql);showDatabaseSql(statements,'正在删除旧战役数据库…');
+    await db.exec(sql);
+  }
+  gameDatabase=next;tableResources.restore([]);tableNames=null;serial=0;
+  const exists=await db.query(`SHOW DATABASES LIKE ${quote(next)}`);
+  // 尚未完成首次存档的新库只含初始化中间表；续建时清理这些表，仍使用同一预定库名。
+  if(reset&&exists.rows.length){
+    const cleanup=`DROP DATABASE IF EXISTS \`${next}\`;`;
+    statements.push(cleanup);showDatabaseSql(statements,'正在重新建立尚未完成的新局数据库…');
+    await db.exec(cleanup);
+  }
+  const create=`CREATE DATABASE ${!reset&&exists.rows.length?'IF NOT EXISTS ':''}\`${next}\`;`;
+  statements.push(create);showDatabaseSql(statements,'正在创建本局独立数据库…');
+  await db.exec(create);await createSchema(next);await archive.initGame(next);
+  maintenanceRevision=0;
+  businessSql=[];saveBlocked=false;
+  showDatabaseSql(statements,'执行成功。新战役数据将由 seekdb 写入 OPFS；刷新可继续这一局。');
+}
+
+async function finishGameDatabaseReset() {
+  if(!resetInProgress)return;
+  if(!campaign||!state||gameDatabase!==resetIntent?.newDatabase)throw new Error('新局尚无完整状态，未清除重开请求。');
+  // 只有完整首档COMMIT成功后才切换目录，刷新时才能区分完成的新局与初始化中间状态。
+  await persistentWrite(db,()=>archive.finishReset(gameDatabase));
+  resetInProgress=false;resetIntent=null;
+}
+
+function requestNewGame() {
+  if($('help-dialog').open)$('help-dialog').close();
+  if(restartRequested)return;
+  restartRequested=true;clearTimeout(uiSaveTimer);finishAnimation();
+  $('restart-game').textContent='正在重开…';
+  saveStatus('正在结束旧操作，准备重开新游戏…');
+  if(!busy&&db)void operation(async()=>{});
+}
+
+async function restoreWorkingData() {
+  // 工作表由完整存档重建，未完成操作留下的中间写入不能改变已保存战役。
+  const level=LEVELS[campaign.level-1];
+  await db.exec(`USE \`${gameDatabase}\``);
+  await db.exec(`REPLACE INTO capabilities VALUES ('enemy','double_fire',${level.enemyDoubleEvery})`);
+  await db.exec("DELETE FROM capabilities WHERE owner='player'");
+  if(campaign.medals.includes('mysql'))await db.exec(`REPLACE INTO capabilities VALUES ('player','double_fire',${state.copiedDoubleEvery||LEVELS[2].enemyDoubleEvery})`);
+  const occupied=new Set(state.enemy.ships.flatMap(ship=>ship.cells.map(key)));
+  await db.exec('DELETE FROM radar_echoes');
+  await db.exec(`INSERT INTO radar_echoes VALUES ${Array.from({length:level.size**2},(_,i)=>`(${i%level.size},${Math.floor(i/level.size)},${occupied.has(`${i%level.size},${Math.floor(i/level.size)}`)?1:0},${campaign.level===5&&i%level.size>=level.size/2?1:0})`).join(',')}`);
+  if(deal){const details=detailEvidence;await writeEvidence(deal);detailEvidence=details;}
+  if(tableNames){
+    const ids=notes.map(n=>quote(n.id));
+    for(const table of new Set([campaign.notesTable,tableNames.notes])){
+      await db.exec(`DELETE FROM ${table}${ids.length?` WHERE id NOT IN (${ids.join(',')})`:''}`);
+    }
+    await saveState();
+  }
+  await restoreSerialHighWater();
+}
+
+async function restoreSerialHighWater() {
+  const tables=await db.query('SHOW TABLES');
+  for(const row of tables.rows)for(const name of Object.values(row)){
+    if(/^(?:notes_main_\d+|(?:live|checkpoint|notes_work|checkpoint_edit|live_restore|notes_after)_\d+_\d+_\d+)$/.test(name)){
+      serial=Math.max(serial,...name.match(/\d+/g).map(Number));
+    }
+  }
+}
+
+async function operation(work,label=work.name||'作战操作',{newGame=false}={}) {
   if (busy) return;
+  if(saveBlocked&&!restartRequested){notify('航海日志保存失败。请刷新重试，或点击“重开新游戏”。','error');return;}
   // SQL动作失败时恢复可操作状态；序号保持单调，已创建的分支名称不复用。
   const backup = clone({campaign, state, deal, detailEvidence, detailSelection, tableNames, notes, queryMetrics, targets,
-    cards: [...cards], abilities: [...abilities], noteSerial, view, tutorialIndex});
+    cards: [...cards], abilities: [...abilities], noteSerial, view, tutorialIndex, gameDatabase});
   busy = true;
   render();
-  try { await work(); }
+  let actionStarted=false;
+  try {
+    // 定期请求Memstore正常落盘；不清除任何战役行或分支，不改变游戏规则。
+    if(archive&&gameDatabase&&archive.revision-maintenanceRevision>=8){
+      await db.exec('ALTER SYSTEM MINOR FREEZE');maintenanceRevision=archive.revision;
+    }
+    if(!restartRequested&&!newGame)await persistArchive(label,{kind:work===fire?'fire':'operation',label});
+    actionStarted=true;
+    if(!restartRequested)await work();
+    if(!restartRequested){await persistArchive(label);await finishGameDatabaseReset();}
+  }
   catch (error) {
+    if(resetInProgress||backup.gameDatabase!==gameDatabase){
+      campaign=null;state=null;deal=null;tableNames=null;view='welcome';saveBlocked=true;
+      detailEvidence=null;detailSelection={sample:'',keyword:''};
+      cards=new Set();abilities=new Set();targets=[];hover=null;fx=null;recordsOpen=false;
+      saveStatus('新局尚未建好 · 可刷新恢复或再次重开',true);
+      $('database-lifecycle-result').textContent=`执行失败：${error.message}。已保留重开请求；刷新可继续建立同一新局。`;
+      notify(`建立新战役失败，未把旧局状态写入新库：${error.message}`,'error');return;
+    }
     ({campaign, state, deal, detailEvidence, detailSelection, tableNames, notes, queryMetrics, targets, view, tutorialIndex} = backup);
     cards = new Set(backup.cards); abilities = new Set(backup.abilities);
     // 补偿已成功写入而动作尚未提交的笔记，避免重试或Merge保留幽灵记录。
@@ -133,10 +311,18 @@ async function operation(work) {
     if (state?.activeSector) state.knowledge = state.sectorKnowledge[state.activeSector];
     notify(`执行失败：${error.message}`, 'error');
     $('engine-detail').textContent = error.message;
+    if(recoveringAction){
+      saveBlocked=true;saveStatus('上次炮击尚未完成 · 原存档保留，请刷新重试',true);return;
+    }
+    if(actionStarted&&!saveBlocked&&!restartRequested){try{await persistArchive('操作失败，恢复原状态');}catch{/* 保留原存档及错误提示。 */}}
   } finally {
     // 成功时保留新引用；失败时backup已恢复，先保留旧引用再清理孤立分支。
     await cleanupDynamicTables();
     busy = false; render();
+    if(restartRequested&&db){
+      restartRequested=false;$('restart-game').textContent='重开新游戏';saveBlocked=false;
+      await operation(async()=>{await startCampaign(freshSeed());},'重开新游戏',{newGame:true});
+    }
   }
 }
 
@@ -150,9 +336,8 @@ function ordinaryShots() {
   return hasMedal('mysql') && state?.copiedDoubleEvery > 0 && state.round % state.copiedDoubleEvery === 0 ? 2 : 1;
 }
 
-async function createSchema() {
-  await db.exec('CREATE DATABASE IF NOT EXISTS seekdb_naval');
-  await db.exec('USE seekdb_naval');
+async function createSchema(name) {
+  await db.exec(`USE \`${name}\``);
   await db.exec(`CREATE TABLE IF NOT EXISTS intelligence (
     id VARCHAR(64) PRIMARY KEY, sector_id VARCHAR(8), cells LONGTEXT, tactical_cells LONGTEXT, tactical_hint TEXT,
     tactical_clues LONGTEXT, fleet_manifest TEXT, map_x DOUBLE, map_y DOUBLE, enemy_fire_every INT, detail_keyword VARCHAR(24), body TEXT,
@@ -185,7 +370,8 @@ async function createSchema() {
   await db.exec("REPLACE INTO capabilities VALUES ('enemy','double_fire',2)");
 }
 
-async function startCampaign(seed = freshSeed()) {
+async function startCampaign(seed = freshSeed(), reuseDatabase = false) {
+  if(!reuseDatabase)await replaceGameDatabase();
   const cleanSeed = String(seed).trim().slice(0, 64) || freshSeed();
   campaign = {seed: cleanSeed, id: ++serial, level: 1, medals: [], score: 0, rewinds: {}, lastForkUseLevel: null};
   logs = []; notes = []; queryMetrics = []; noteSerial = 0;
@@ -786,7 +972,7 @@ async function lose(reason) {
   notify(reason + (canRewind() ? '本关还可重开一次。' : '本轮战役结束。'), 'error');
   showResult(canRewind() ? '舰队失守 · 尚有一次试错机会' : 'Game Over · 本轮战役结束',
     reason + (canRewind() ? FORK_DESCRIPTION : '重新出航将清空本轮勋章，生成不同的第一关。'),
-    canRewind() ? '试错机会 · 重开本关' : '从新的第一关出发');
+    canRewind() ? '试错机会 · 重开本关' : '重开新游戏');
 }
 
 async function rewind() {
@@ -818,7 +1004,7 @@ async function rewind() {
 function showResult(title, message, action) {
   $('result-title').textContent = title; $('result-copy').textContent = message;
   $('next-level').textContent = action;
-  $('retry-level').textContent = '结束本轮，生成新战役';
+  $('retry-level').textContent = '重开新游戏';
   view = 'result'; $('result-panel').hidden = false;
   window.scrollTo(0, 0);
 }
@@ -879,7 +1065,7 @@ function selectionStatus() {
 }
 
 function render() {
-  $('start-game').disabled = busy || !db;
+  $('start-game').disabled = busy || !db || saveBlocked;
   $('extra-query').hidden = true;
   $('fleet-controls').hidden = Boolean(state && state.phase !== 'deploy');
   document.querySelector('.attack-console').hidden = !state || state.phase === 'deploy';
@@ -1016,16 +1202,20 @@ function renderFlow() {
   const fleetHost = $(view === 'deploy' ? 'deploy-slot' : 'battle-fleet-slot');
   if ($('fleet-panel').parentElement !== fleetHost) fleetHost.append($('fleet-panel'));
   const labels = {welcome: ['准备出航', '找出敌军，击沉舰队。'], tutorial: ['30秒上手', TUTORIAL[tutorialIndex][0]],
+    restarting:['重开新游戏','结束旧操作，删除旧局数据库，再创建本局新数据库。'],
     deploy: ['调整舰队', '点舰身选船 → 点船头目标格；方向键移动，R绕船头旋转。'],
     intel: ['01 情报工作台', selectionStatus().ready?'资料已装入，核对SQL后执行。':'先看任务目标，再选相符资料。'],
     briefing: ['02 混合侦察', '按侦察目标选择回波和监听词，再执行混合 SQL。'],
     theater: ['03 作战海图', '查询结果已自动标记，确认即可出航。'],
     battle: ['04 战术海图', `点敌方海图选格，再发射${ordinaryShots() === 2 ? '两发' : '炮弹'}。`],
-    result: ['战况报告', '携勋章继续出航。']};
+    result: ['战况报告', state?.phase==='gameover'?'本轮已结束，战报保留；点击重开新游戏才清理旧局。':state?.phase==='defeat'?'本关失败，可使用剩余的试错机会。':'领取勋章后继续出航。']};
   const [title, hint] = labels[view] ?? labels.welcome;
   $('flow-title').textContent = title; $('flow-hint').textContent = hint;
   $('flow-status').textContent = busy ? '正在执行…' : state ? `第${campaign.level}关 · 第${state.round}轮` : 'seekdb 大海戦';
-  $('quick-start').disabled = busy || !db;
+  $('quick-start').disabled = busy || !db || saveBlocked;
+  $('retry-level').textContent='重开新游戏';$('retry-level').hidden=state?.phase==='gameover';
+  if(state?.phase==='gameover')$('next-level').textContent='重开新游戏';
+  $('database-lifecycle').hidden=!$('database-lifecycle-sql').textContent||!['welcome','tutorial','deploy','restarting'].includes(view);
   $('tutorial-title').textContent = TUTORIAL[tutorialIndex][0]; $('tutorial-copy').textContent = TUTORIAL[tutorialIndex][1];
   $('tutorial-count').textContent = `${tutorialIndex + 1} / ${TUTORIAL.length}`;
   $('tutorial-next').textContent=tutorialIndex<TUTORIAL.length-1?'下一步':state?.deploymentConfirmed?'开始找情报':'开始布阵';
@@ -1038,7 +1228,7 @@ function renderFlow() {
   $('back-battle-button').hidden = !state?.activeSector || !['intel','theater'].includes(view);
   $('back-battle-button').disabled = busy;
   for (const id of ['recon-button','change-sector-button']) {$(id).hidden=true;$(id).disabled=true;}
-  if (!state || ['welcome','tutorial','deploy','result'].includes(view)) recordsOpen = false;
+  if (!state || ['welcome','tutorial','deploy'].includes(view)) recordsOpen = false;
   $('records-panel').hidden = !recordsOpen;
   $('toggle-records').setAttribute('aria-expanded', String(recordsOpen));
   $('toggle-records').textContent = recordsOpen ? '收起战报与笔记' : '展开战报与笔记';
@@ -1059,7 +1249,8 @@ function renderFlow() {
   const clues=queriedClues(), clueHost=$('tactical-clues');
   const numbering=['一','二','三','四'];
   const clueNodes=clues.map((clue,index)=>{
-    let text=clue.text.replace(/^开局(?:统计|观测)：/,'').replace(/舰格/g,'敌军舰格').replace(/完整舰/g,'完整敌军战舰');
+    let text=clue.text.replace(/^开局(?:统计|观测)：/,'').replace(/舰格/g,'敌军舰格').replace(/完整舰/g,'完整敌军战舰')
+      .replace(/(\d)(\p{Script=Han})/gu,'$1 $2').replace(/(\p{Script=Han})(\d)/gu,'$1 $2');
     return element('p','clue-summary',`线索${numbering[index]||index+1}：敌方海图中，${text}`);
   });
   clueHost.replaceChildren(...(clueNodes.length?clueNodes:[element('p','clue-summary','线索等待 seekdb 实际查询。')]));
@@ -1134,8 +1325,9 @@ function shotText(side, result) {
   return ({miss:'没有击中',hit:side==='fleet'?'我方战舰中弹':'击中敌舰',sunk:side==='fleet'?'我方战舰被击沉':'敌方战舰被击沉',drift:'炮弹偏离',repeated:'该格已经投弹'})[result] || '';
 }
 async function animate(type, cells, side, result, duration) {
+  if(recoveringAction||restartRequested)return;
   const combat=['launch','shot'].includes(type);
-  if(type==='launch'||type==='scan'&&side==='enemy') {
+  if(document.body.dataset.battleFitActive!=='true'&&(type==='launch'||type==='scan'&&side==='enemy')) {
     const canvas=$(side==='fleet'?'fleet-board':'enemy-board'),rect=canvas.getBoundingClientRect();
     const headerBottom=Math.max(0,document.querySelector('.masthead').getBoundingClientRect().bottom);
     // 武器始终展开后操作区较长，开炮时让受击海图回到可见范围。
@@ -1156,7 +1348,10 @@ async function animate(type, cells, side, result, duration) {
     $('battle-animation-label').textContent=label;$('impact-readout').textContent=caption;
     if(type==='shot') $(side==='fleet'?'enemy-last-shot':'player-last-shot').textContent=caption;
   }
-  await sleep(ms);fx=null;
+  await new Promise(resolve=>{
+    const timer=setTimeout(resolve,ms);
+    finishAnimation=()=>{clearTimeout(timer);resolve();};
+  });finishAnimation=()=>{};fx=null;
 }
 
 const LCD={light:SEA_PALETTE.ship,sea:SEA_PALETTE.water,line:SEA_PALETTE.grid,ink:SEA_PALETTE.ink,frame:SEA_PALETTE.frame,hit:SEA_PALETTE.hit,sunk:SEA_PALETTE.sunk,radarYes:SEA_PALETTE.radarYes,radarNo:SEA_PALETTE.radarNo};
@@ -1406,6 +1601,13 @@ function drawBoard(canvas, side, now) {
 function draw(now) { for(const canvas of document.querySelectorAll('canvas[data-pixel-icon]'))paintIcon(canvas,canvas.dataset.pixelIcon,Math.floor(now/240)%2); drawTheater(now); drawBoard($('enemy-board'), 'enemy', now); drawBoard($('fleet-board'), 'fleet', now); requestAnimationFrame(draw); }
 
 function setupControls() {
+  $('restart-game').addEventListener('click',requestNewGame);
+  $('help-restart').addEventListener('click',requestNewGame);
+  for(const type of ['click','change','keydown'])document.addEventListener(type,event=>{
+    if(event.target.closest?.('#restart-game,#help-dialog'))return;
+    if(type==='keydown'&&!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter',' ','r','R'].includes(event.key))return;
+    scheduleUISave();
+  });
   const forkHelp = [...$('help-dialog').querySelectorAll('.help-steps li')]
     .find(item => item.querySelector('strong')?.textContent === '试错机会');
   if (forkHelp) forkHelp.querySelector('p').textContent = `${FORK_DESCRIPTION}重开后再次失败，本轮战役结束。`;
@@ -1418,8 +1620,8 @@ function setupControls() {
   tools.append(label, direction); document.querySelector('.navy-weapon-content').append(tools);
   select.addEventListener('change', () => { state.weapon = select.value; targets = [];  render(); });
   direction.addEventListener('click', () => { state.direction = state.direction === 'horizontal' ? 'vertical' : 'horizontal'; render(); });
-  $('start-game').addEventListener('click', () => operation(async () => {await startCampaign($('new-seed').value); tutorialIndex = 0; setView('tutorial');}));
-  $('quick-start').addEventListener('click', () => operation(() => startCampaign($('new-seed').value)));
+  $('start-game').addEventListener('click', () => operation(async () => {await startCampaign($('new-seed').value); tutorialIndex = 0; setView('tutorial');},'创建新游戏',{newGame:true}));
+  $('quick-start').addEventListener('click', () => operation(() => startCampaign($('new-seed').value),'创建新游戏',{newGame:true}));
   $('tutorial-next').addEventListener('click', () => {if(tutorialIndex<TUTORIAL.length-1){tutorialIndex++;render();}else setView(state?.deploymentConfirmed?'intel':'deploy');});
   $('tutorial-skip').addEventListener('click',()=>setView(state?.deploymentConfirmed?'intel':'deploy'));
   for (const [id, screen] of [['view-intel','intel'], ['view-theater','theater'], ['view-battle','battle']]) $(id).addEventListener('click', () => setView(screen));
@@ -1430,6 +1632,10 @@ function setupControls() {
   $('toggle-records').addEventListener('click', () => {
     recordsOpen = !recordsOpen; renderFlow();
     if (recordsOpen) $('records-panel').scrollIntoView({block:'start', behavior:'instant'});
+  });
+  $('result-records').addEventListener('click',()=>{
+    recordsOpen=!recordsOpen;renderFlow();
+    if(recordsOpen)$('records-panel').scrollIntoView({block:'start',behavior:'instant'});
   });
   $('random-seed').addEventListener('click', () => {$('new-seed').value = freshSeed();});
   $('confirm-fleet').addEventListener('click', () => operation(confirmDeployment));
@@ -1460,8 +1666,11 @@ function setupControls() {
   $('clear-selection').addEventListener('click', () => {targets = []; render();});
   $('rewind-button').addEventListener('click', () => operation(rewind));
   $('confirm-rewards').addEventListener('click',()=>operation(confirmRewards));
-  $('next-level').addEventListener('click',()=>operation(advanceFromResult));
-  $('retry-level').addEventListener('click', () => operation(() => startCampaign()));
+  $('next-level').addEventListener('click',()=>{
+    if(state?.phase==='gameover'||state?.phase==='victory'&&campaign.level===6&&state.rewardsConfirmed)requestNewGame();
+    else void operation(advanceFromResult);
+  });
+  $('retry-level').addEventListener('click',requestNewGame);
   $('help-button').addEventListener('click', () => $('help-dialog').showModal());
   $('close-help').addEventListener('click', () => $('help-dialog').close());
   const enemy = $('enemy-board'); const fleet = $('fleet-board');
@@ -1487,17 +1696,61 @@ function setupControls() {
 }
 
 async function boot() {
-  setupControls();paintPixelBrand($('brand-logo-canvas')).catch(()=>{}); $('new-seed').value = freshSeed(); render(); requestAnimationFrame(draw);
+  setupControls();battleFit=setupBattleFit();paintPixelBrand($('brand-logo-canvas')).catch(()=>{}); $('new-seed').value = freshSeed(); render(); requestAnimationFrame(draw);
   try {
     db = await NavalDB.open(message => {$('engine-detail').textContent = message; $('engine-progress').value = Math.min(85, $('engine-progress').value + 24);});
-    await createSchema();
+    archive=new NavalArchive(db);
+    db.onQuery=entry=>{if(!archive.writing)businessSql.push({...entry,at:new Date().toISOString()});};
+    const catalog=await archive.initCatalog();
+    let pending=null;
+    if(catalog.reset){
+      resetInProgress=true;resetIntent=catalog.reset;
+      const exists=await db.query(`SHOW DATABASES LIKE ${quote(catalog.reset.newDatabase)}`);
+      let saved=null;
+      if(exists.rows.length){
+        gameDatabase=catalog.reset.newDatabase;
+        await db.exec(`USE \`${gameDatabase}\``);await archive.initGame(gameDatabase);
+        saved=await archive.load(gameDatabase);
+      }
+      if(saved){
+        if(saved.pending)throw new Error('新局初始化存档含未完成操作，原数据已保留。请重试或明确选择重开新游戏。');
+        restorePayload(saved.payload);await restoreSerialHighWater();
+      }else{
+        await replaceGameDatabase(catalog.reset);await startCampaign(freshSeed(),true);await persistArchive('恢复已确认的新局创建');
+      }
+      await finishGameDatabaseReset();
+    }else if(catalog.databaseName){
+      gameDatabase=catalog.databaseName;
+      await db.exec(`USE \`${gameDatabase}\``);await archive.initGame(gameDatabase);
+      const saved=await archive.load(gameDatabase);
+      if(saved){
+        restorePayload(saved.payload);pending=saved.pending;
+        // 完成提交的OPFS原库可直接续用；正常刷新只读取，不反复重灌业务表。
+        if(pending)await persistentWrite(db,restoreWorkingData,{onRetry:()=>saveStatus('正在整理OPFS存档并恢复未完成操作…')});
+        else await restoreSerialHighWater();
+      }
+      else saveStatus('本局尚无完整存档 · 可点击开始或重开');
+    }
     $('engine-status').textContent = '真实 seekdb 已就绪';
     $('engine-detail').textContent = db.engineVersion;
     $('engine-progress').value = 100; busy = false; render();
-    notify('点击“开始作战”，先部署舰队。SQL 将在浏览器内真实执行。');
+    if(pending?.kind==='fire'){
+      saveStatus('正在完成刷新前已确认的炮击…');recoveringAction=true;
+      try{await operation(fire,'恢复刷新前炮击');}finally{recoveringAction=false;}
+    }else if(campaign){
+      if(pending)await persistArchive('恢复中断前战役');
+      else saveStatus(`OPFS · 已恢复 · 第${campaign.level}关 / 第${state.round}回合`);
+      notify('已从 seekdb OPFS 恢复原战役。舰位、伤害、资源与冷却保持不变。');
+    }else{
+      saveStatus('OPFS 已就绪 · 开始新游戏时创建独立数据库');
+      notify('点击开始，创建本局数据库并部署舰队。已保存的战役可在刷新后继续。');
+    }
+    if(restartRequested)await operation(async()=>{});
     if (new URLSearchParams(location.search).has('test')) window.navalTest = {
       db, getState: () => ({campaign, state, deal, detailEvidence, detailSelection, tableNames, notes, queryMetrics, busy, view}), geometry: id => boardGeometry($(id)), tacticalRegion, selectedShip:()=>selectedShip, selection:()=>clone(targets),
-      start: seed => operation(() => startCampaign(seed)), confirm: () => operation(confirmDeployment),
+      archiveInfo:()=>({database:gameDatabase,revision:archive.revision,saveBlocked,restartRequested}),
+      snapshot:()=>archivePayload(),flush:()=>operation(async()=>{},'保存当前选择'),restart:requestNewGame,
+      start: seed => operation(() => startCampaign(seed),'创建新游戏',{newGame:true}), confirm: () => operation(confirmDeployment),
       recon: () => operation(runRecon), detailSearch:()=>operation(runDetailSearch), acceptBriefing:()=>operation(acceptBriefing),
       detailSelect(sample,keyword){detailSelection={sample,keyword};render();}, animationInfo:()=>fx?clone(fx):null, engage: sector => operation(() => engageSector(sector)), fire: () => operation(fire), rewind: () => operation(rewind),
       selectCards(ids, methods) {cards = new Set(ids); abilities = new Set(methods); render();},
@@ -1512,8 +1765,11 @@ async function boot() {
       lose: (reason = '测试关卡失败') => operation(() => lose(reason)),
     };
   } catch (error) {
-    $('engine-status').textContent = 'seekdb 启动失败'; $('engine-detail').textContent = error.message;
+    busy=false;saveBlocked=true;
+    $('engine-status').textContent = db?'航海日志读取失败':'seekdb 启动失败'; $('engine-detail').textContent = error.message;
+    saveStatus('无法读取原存档 · 未自动删除或重开',true);
     $('engine-progress').value = 0; notify(error.message, 'error');
+    render();
   }
 }
 

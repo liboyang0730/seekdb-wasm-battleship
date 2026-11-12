@@ -61,8 +61,23 @@ func sameGame(port int, digest string) bool {
 		response.Header.Get("Cross-Origin-Embedder-Policy") == "require-corp"
 }
 
+func listenForGame(port int, digest string) (net.Listener, error) {
+	if port < 1 || port > 65535 {
+		return nil, fmt.Errorf("本机固定端口必须在1到65535之间；不能使用随机端口")
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:"+strconv.Itoa(port))
+	if err == nil {
+		return listener, nil
+	}
+	if sameGame(port, digest) {
+		return nil, nil
+	}
+	// OPFS按网址隔离；自动换端口会让玩家看不到原来的本地存档。
+	return nil, fmt.Errorf("固定地址 http://127.0.0.1:%d/ 暂不可用。请关闭旧启动器或释放该端口后重试；为保留原存档地址，不会自动改用其他端口。", port)
+}
+
 func main() {
-	port := flag.Int("port", 8876, "本机端口；冲突时选择下一个空闲端口")
+	port := flag.Int("port", 8876, "本机固定端口；改动端口将使用不同的本地存档")
 	noOpen := flag.Bool("no-open", false, "不自动打开系统默认浏览器，供验证使用")
 	pageArg := flag.String("html", "", "游戏HTML路径，默认与启动器同目录")
 	flag.Parse()
@@ -80,22 +95,19 @@ func main() {
 	}
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
-	var listener net.Listener
-	for candidate := *port; candidate < *port+30 && candidate <= 65535; candidate++ {
-		listener, err = net.Listen("tcp4", "127.0.0.1:"+strconv.Itoa(candidate))
-		if err == nil {
-			break
-		}
-		if !*noOpen && sameGame(candidate, digest) {
-			url := "http://127.0.0.1:" + strconv.Itoa(candidate) + "/"
+	listener, err := listenForGame(*port, digest)
+	if err != nil {
+		stopWithMessage(err.Error())
+	}
+	if listener == nil {
+		url := "http://127.0.0.1:" + strconv.Itoa(*port) + "/"
+		fmt.Println("已复用同一游戏服务：", url)
+		if !*noOpen {
 			if err := openBrowser(url); err != nil {
 				fmt.Println("请将网址复制到Safari、Chrome、Edge或Firefox打开：", url)
 			}
-			return
 		}
-	}
-	if listener == nil {
-		stopWithMessage("本机端口暂不可用，请关闭旧启动窗口后重试。")
+		return
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,7 @@ export class NavalDB {
   #queue = Promise.resolve();
   #decoder = new TextDecoder();
   engineVersion = '';
+  onQuery = null;
 
   static async open(onProgress = () => {}) {
     if (!globalThis.crossOriginIsolated || typeof SharedArrayBuffer === 'undefined') {
@@ -19,7 +20,7 @@ export class NavalDB {
     const wasmFile = navigator.vendor === 'Apple Computer, Inc.'
       ? './engine/seekdb_wasm_database.webkit.wasm' : './engine/seekdb_wasm_database.wasm';
     const wasmURL = new URL(wasmFile, import.meta.url);
-    instance.#database = await Database.open({moduleURL, wasmURL, storage: 'memory'});
+    instance.#database = await Database.open({moduleURL, wasmURL, storage: 'opfs'});
     onProgress('正在连接浏览器内的 seekdb SQL 会话…');
     instance.#session = await instance.#database.connect();
     const version = await instance.query('SELECT VERSION() AS version');
@@ -33,7 +34,7 @@ export class NavalDB {
       const started = performance.now();
       let columns = [];
       const rows = [];
-      for await (const event of this.#session.query(sql)) {
+      try { for await (const event of this.#session.query(sql)) {
         if (event.kind === 'columns') {
           columns = event.columns.map(column => this.#decoder.decode(column.name));
         } else if (event.kind === 'row') {
@@ -42,7 +43,13 @@ export class NavalDB {
           ])));
         }
       }
-      return {rows, elapsedMs: performance.now() - started};
+      const result = {rows, elapsedMs: performance.now() - started};
+      try { this.onQuery?.({sql, ...result}); } catch { /* 记录失败不能更改SQL结果。 */ }
+      return result;
+      } catch (error) {
+        try { this.onQuery?.({sql, rows: [], elapsedMs: performance.now() - started, error: error.message}); } catch { /* 保留原始SQL异常。 */ }
+        throw error;
+      }
     };
     const result = this.#queue.then(run);
     // 单条 SQL 报错后，后续队列仍可继续；错误原样交给调用方。

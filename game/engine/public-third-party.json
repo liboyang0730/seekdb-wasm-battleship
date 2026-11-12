@@ -61,7 +61,13 @@
         "httpStatus": 404
       }
     ],
-    "distributionPatches": "单页构建会重定位 JavaScript 模块、Wasm URL 和 Worker URL；对应改动由构建清单 packagedPatches 记录。两个 Wasm 二进制未修改。"
+    "distributionPatches": "单页构建会重定位 JavaScript 模块、Wasm URL 和 Worker URL；对应改动由构建清单 packagedPatches 记录。两个 Wasm 二进制未修改。",
+    "localSdkCompatibility": {
+      "description": "SDK加载器加入运行日志轮转及可重建临时文件的OPFS句柄兼容；不改变游戏规则、数据库CLOG/SST或Wasm二进制。",
+      "record": "OPFS日志兼容修改.json",
+      "helper": "opfs-log-handles.mjs",
+      "helperSha256": "71d2410d8bc135b000038718d084e03c86de389e1e87b1d9f68a70700ca60d7f"
+    }
   },
   "otherBundledComponents": [
     {

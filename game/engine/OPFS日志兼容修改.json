@@ -1,0 +1,20 @@
+{
+  "purpose": "修复 observer.log 及其轮转临时文件的 OPFS 锁定句柄移动；其余数据文件沿用原行为。 同时适配可重建的 local/allocation.tmp 在 Rust 关闭句柄前 unlink 的时序。",
+  "file": "seekdb_wasm_database.mjs",
+  "upstreamSha256": "7e15164b6a830e991169b2482a94146fac4f1f5c97e143db90ce7d3a02f75dfe",
+  "modifiedSha256": "ad56785df6343972e31f6e062d2f90db76a9e700a89a31d43b58d33a8f698105",
+  "wasmUnchanged": true,
+  "changes": [
+    "显式导入 opfs-log-handles.mjs",
+    "同步句柄打开后登记、关闭时取消登记",
+    "日志move暂时释放锁、通过同一FileHandle在原ID重开",
+    "句柄恢复失败走原Emscripten abort，禁止继续引擎I/O",
+    "仅 local/allocation.tmp 延迟到最后一个相关句柄关闭再实际删除；核对entry身份，其他数据文件删除不变",
+    "异步移动与重开逐次核验句柄登记代次及原槽位，禁止覆盖已复用的数据文件句柄"
+  ],
+  "upstreamWasms": {
+    "seekdb_wasm_database.wasm": "8122b07878b15bd565090473b73fd623684c346325eb2d0d053b36b30253bfbb",
+    "seekdb_wasm_database.webkit.wasm": "9f7ca760a80fdd2fc88bd35c078d7dacde43f14a698005748f50a5b335765f39"
+  },
+  "helperSha256": "71d2410d8bc135b000038718d084e03c86de389e1e87b1d9f68a70700ca60d7f"
+}

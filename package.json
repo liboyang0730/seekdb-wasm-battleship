@@ -1,6 +1,6 @@
 {
   "name": "seekdb-wasm-battleship",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "基于真实 seekdb WebAssembly 的中文像素海战游戏",
   "type": "module",
@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test game/规则测试.mjs game/战术线索测试.mjs game/细节检索测试.mjs game/作战流程测试.mjs game/像素图鉴测试.mjs game/棋盘字模测试.mjs game/情报剧本测试.mjs game/情报组合测试.mjs game/检索任务测试.mjs game/战术规划测试.mjs game/资源清理测试.mjs",
+    "test": "node --test game/规则测试.mjs game/战术线索测试.mjs game/细节检索测试.mjs game/作战流程测试.mjs game/像素图鉴测试.mjs game/棋盘字模测试.mjs game/情报剧本测试.mjs game/情报组合测试.mjs game/检索任务测试.mjs game/战术规划测试.mjs game/资源清理测试.mjs game/航海存档测试.mjs game/持久写入测试.mjs game/OPFS日志句柄测试.mjs",
     "start": "python3 game/serve.py --open",
     "build:html": "python3 game/打包单页.py"
   }

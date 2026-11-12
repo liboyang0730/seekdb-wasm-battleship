@@ -16,6 +16,8 @@ d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887
 
 Chrome 与 WebKit 两套 Wasm 二进制保留官方原始字节。单页打包会重定位 JavaScript 模块、Wasm URL 与 Worker URL；这些分发副本改动由构建清单的 `packagedPatches` 记录，不应将改动后的分发副本称为未经修改的上游 JavaScript。
 
+本项目另为 SDK 加载器添加了窄范围 OPFS 句柄兼容：运行日志轮转时暂时释放锁并在原句柄编号重开；可重建的 `local/allocation.tmp` 延迟到最后句柄关闭后删除。原始与修改后哈希、范围见 [OPFS 兼容修改记录](../game/engine/OPFS日志兼容修改.json)，实现见 [兼容模块](../game/engine/opfs-log-handles.mjs)。数据库 CLOG、SST 及两个 Wasm 二进制保持原有行为与字节。
+
 ### NOTICE 的来源与版本边界
 
 [game/engine/NOTICE](../game/engine/NOTICE) 按上游 **v1.4.0** 源码树原字节保存，包含 libev、http_parser、lz4、snappy、zlib、zstd 的归属及许可声明。

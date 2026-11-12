@@ -10,6 +10,25 @@ function resources() {
   return new api.DynamicTableResources();
 }
 const created = async () => ({ ok: true });
+
+test('持久存档恢复完整分支关系，清空后可登记新局', async () => {
+  const original=resources();await session(original,1);
+  const restored=resources();restored.restore(JSON.parse(JSON.stringify(original.entries())));
+  assert.deepEqual(restored.entries(),original.entries());
+  restored.restore([]);assert.equal(restored.size,0);
+  await restored.create('notes_main_1',created);assert.equal(restored.size,1);
+});
+
+test('损坏或循环分支登记不能覆盖原有登记', async () => {
+  const r=resources();await r.create('notes_main_1',created);const before=r.entries();
+  for(const entries of [
+    [{name:'intelligence',parent:null}],
+    [{name:'notes_main_1\n',parent:null}],
+    [{name:'checkpoint_1_1_1',parent:'live_1_1_1'}],
+    [{name:'live_1_1_1',parent:'checkpoint_1_1_1'},{name:'checkpoint_1_1_1',parent:'live_1_1_1'}],
+    [{name:'notes_main_1',parent:null},{name:'notes_main_1',parent:null}],
+  ]){assert.throws(()=>r.restore(entries),/分支/);assert.deepEqual(r.entries(),before);}
+});
 async function session(r, campaign, serial = campaign) {
   const names = { main: `notes_main_${campaign}`, live: `live_${campaign}_1_${serial}`,
     checkpoint: `checkpoint_${campaign}_1_${serial}`, notes: `notes_work_${campaign}_1_${serial}` };
