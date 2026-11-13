@@ -85,7 +85,9 @@ async function download(url, cache, expected = null) {
     const aborted=new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>reject(controller.signal.reason),{once:true}));
     resetIdle();
     try {
-      const response = await Promise.race([fetch(new Request(url,{cache:'reload',redirect:'error',signal:controller.signal})),aborted]);
+      // 内容SHA块允许复用HTTP缓存；若失败或校验不符，第二次必须绕过旧HTTP缓存。
+      const cacheMode=attempt===0&&(expected?.kind==='chunk'||expected?.kind==='game-chunk')?'default':'reload';
+      const response = await Promise.race([fetch(new Request(url,{cache:cacheMode,redirect:'error',signal:controller.signal})),aborted]);
       if (!response.ok || response.status !== 200) throw new Error(`资源下载失败（HTTP ${response.status}）。`);
       resetIdle();
       reader=response.body.getReader();

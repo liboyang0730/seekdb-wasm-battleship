@@ -21,10 +21,10 @@ const manifest = {version:'v0.2.1',game:{path:'game.html',bytes:gameBody.length,
   }))};
 
 // 用标准 Request/Response 执行真实 SW 代码；仅替代 Node 没有的浏览器事件与缓存容器。
-function worker({offline = false, failGame = false, failChunk = '', failOnce = '', corruptChunk = '', badManifest = null,
+function worker({offline = false, failGame = false, failChunk = '', failOnce = '', corruptChunk = '', staleChunk = '', badManifest = null,
   delayed = false, streamPath = '', streamDelays = [], headerDelay = 0,sharedStores = new Map(), buildId = 'A'} = {}) {
   assert.ok(existsSync(file('service-worker.js')), '尚未实现网页隔离与离线缓存');
-  const events = {}, stores = sharedStores, requested = [],attempts=new Map(),abortedRequests=[];
+  const events = {}, stores = sharedStores, requested = [],attempts=new Map(),abortedRequests=[],requestModes=[];
   let active=0,maxActive=0,timerSerial=0,now=0;
   const virtualTimers=new Map(),blocks=new Map([...gameBodies,...chunkBodies]);
   const timer=(fn,delay)=>{const id=++timerSerial;virtualTimers.set(id,{fn,at:now+delay});return id;};
@@ -52,12 +52,13 @@ function worker({offline = false, failGame = false, failChunk = '', failOnce = '
       requested.push(url);
       if (offline) throw new Error('模拟断网');
       const path=url.slice(base.length), count=(attempts.get(path)||0)+1;attempts.set(path,count);
+      requestModes.push({path,cache:input.cache});
       input.signal.addEventListener('abort',()=>abortedRequests.push(path),{once:true});
       if(path===streamPath&&headerDelay)await new Promise(resolve=>timer(resolve,headerDelay));
       if(delayed&&blocks.has(path)){active++;maxActive=Math.max(maxActive,active);await new Promise(resolve=>setImmediate(resolve));active--;}
       const chunk=blocks.get(path);
       let body=path==='assets.json'?JSON.stringify(badManifest||manifest):chunk|| (path==='game.html'?gameBody:'shell');
-      if(path===corruptChunk){body=Buffer.from(body);body[0]^=1;}
+      if(path===corruptChunk||path===staleChunk&&input.cache==='default'&&count===1){body=Buffer.from(body);body[0]^=1;}
       if(path===streamPath){
         let scheduled,index=0,closed=false;
         body=new ReadableStream({start(controller){
@@ -81,7 +82,7 @@ function worker({offline = false, failGame = false, failChunk = '', failOnce = '
     },
   });
   vm.runInContext(readFileSync(file('service-worker.js'), 'utf8').replace('__BUILD_ID__',buildId), context);
-  return {events, stores, requested, caches, attempts,stats:()=>({maxActive,now,abortedRequests}),setOffline:value=>{offline=value;},setFailChunk:value=>{failChunk=value;},
+  return {events, stores, requested, caches, attempts,stats:()=>({maxActive,now,abortedRequests,requestModes}),setOffline:value=>{offline=value;},setFailChunk:value=>{failChunk=value;},
     async advance(milliseconds){
       const target=now+milliseconds;await settle();
       for(;;){
@@ -171,6 +172,20 @@ test('临时HTTP失败可有界重试后成功，不下载另一种引擎',async
   const path=manifest.engines.chrome.chunks[0].path,w=worker({failOnce:path});await w.lifecycle('install');
   assert.equal((await w.prepare()).ok,true);assert.equal(w.attempts.get(path),2);
   assert.ok(w.requested.every(url=>!url.includes('engine-webkit-')));
+});
+
+test('首次块请求允许HTTP缓存，shell与manifest仍强制reload',async()=>{
+  const w=worker();await w.lifecycle('install');assert.equal((await w.prepare()).ok,true);
+  const modes=w.stats().requestModes,blocks=modes.filter(item=>item.path.endsWith('.bin'));
+  assert.ok(blocks.length>0);assert.ok(blocks.every(item=>item.cache==='default'));
+  assert.ok(modes.filter(item=>!item.path.endsWith('.bin')).every(item=>item.cache==='reload'));
+});
+
+test('default返回旧坏块时，第二次reload取得新块且SHA正确才成功',async()=>{
+  const path=manifest.engines.chrome.chunks[0].path,w=worker({staleChunk:path});await w.lifecycle('install');
+  assert.equal((await w.prepare()).ok,true);assert.equal(w.attempts.get(path),2);
+  assert.deepEqual(w.stats().requestModes.filter(item=>item.path===path).map(item=>item.cache),['default','reload']);
+  w.setOffline(true);assert.equal((await w.prepare()).ok,true,'只有校验正确的新块可以供断网重用');
 });
 
 test('manifest路径越过scope时拒绝安装，不可进入缓存白名单',async()=>{
