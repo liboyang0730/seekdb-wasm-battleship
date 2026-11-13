@@ -72,7 +72,11 @@
         if (finished) return;
         const data = event.data;
         if (data?.type === 'progress') {
-          if (data.stage === 'game') message('正在缓存游戏界面，随后下载当前浏览器所需的引擎分块…');
+          if (data.stage === 'game') {
+            const count = Number.isInteger(data.completed) && Number.isInteger(data.total)
+              ? `：已缓存 ${data.completed} / ${data.total} 块` : '';
+            message(`正在缓存游戏界面${count}，随后准备当前浏览器所需引擎…`);
+          }
           else if (Number.isInteger(data.completed) && Number.isInteger(data.total)) {
             message(`正在准备${engineKey === 'webkit' ? 'Safari' : '当前浏览器'}引擎：已缓存 ${data.completed} / ${data.total} 块。首次约 18 MB；失败后可点击重试，保留已成功的分块。`);
           }

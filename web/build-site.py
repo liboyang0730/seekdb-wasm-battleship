@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""将正式离线单页转换为网页专用站点；只外置双引擎 gzip，不改离线构建器。"""
+"""将正式离线单页转换为网页专用站点；HTML与双引擎分块，不改离线构建器。"""
 import argparse
 import base64
 import binascii
@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import tempfile
 
-CHUNK_BYTES = 1024 * 1024
+CHUNK_BYTES = 256 * 1024
 VERSION = 'v0.2.1'
 ORIGINAL_COMPRESSED = 'const compressed = decode(payload.nodes[engine.path].data);'
 WEB_COMPRESSED = r'''const compressed = await (async () => {
@@ -133,7 +133,13 @@ def build(game, site):
     html = html[:span[0]] + safe_json(payload) + html[span[1]:]
     html = html.replace(ORIGINAL_COMPRESSED, WEB_COMPRESSED, 1)
     page = html.encode('utf-8')
-    assets['game'] = {'path': 'game.html', 'bytes': len(page), 'sha256': sha(page)}
+    game_chunks = []
+    for index, start in enumerate(range(0, len(page), CHUNK_BYTES)):
+        data = page[start:start + CHUNK_BYTES]
+        relative = f'assets/game-{index:03d}.bin'
+        game_chunks.append({'path': relative, 'bytes': len(data), 'sha256': sha(data)})
+        outputs.append((relative, data))
+    assets['game'] = {'path': 'game.html', 'bytes': len(page), 'sha256': sha(page), 'chunks': game_chunks}
     outputs.extend([('game.html', page), ('assets.json', (safe_json(assets) + '\n').encode('utf-8'))])
     # 所有路径先核验，再写文件，拒绝 assets/ 或目标文件的越界软链接。
     for relative, _ in outputs:

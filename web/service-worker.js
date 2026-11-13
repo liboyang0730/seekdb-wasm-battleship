@@ -1,11 +1,17 @@
 // 同一个 SW 负责隔离响应头和分块缓存；不打开数据库，也不接触 OPFS 存档。
 const VERSION = 'v0.2.1';
 const CACHE_PREFIX = 'seekdb-battleship-static-';
-const CACHE_NAME = `${CACHE_PREFIX}${VERSION}-__BUILD_ID__`;
 const ROOT = new URL(self.registration.scope);
+const SCOPE_CACHE_PREFIX = `${CACHE_PREFIX}${encodeURIComponent(ROOT.pathname)}:`;
+const CACHE_NAME = `${SCOPE_CACHE_PREFIX}${VERSION}-__BUILD_ID__`;
+// 块用内容SHA寻址，代码或文案更新不会迫使官方引擎重新下载。
+const BLOCK_CACHE = 'seekdb-battleship-blocks-v1';
+const BLOCK_ROOT = new URL('__seekdb_blocks__/', ROOT);
 const SHELL = ['index.html', 'launch.js', 'styles.css', 'logo.svg', 'assets.json'];
 const MANIFEST = new URL('assets.json', ROOT).href;
 const jobs = new Map();
+const verifiedBlocks = new Set(), blockJobs = new Map(), verifiedGames = new Set();
+let manifestPromise;
 const SHA256 = /^[a-f0-9]{64}$/;
 
 function inScope(url) {
@@ -34,20 +40,25 @@ function validateManifest(value) {
   }
   const files = new Map(SHELL.map(path=>[new URL(path, ROOT).href,null]));
   files.set(new URL(value.game.path, ROOT).href,{...value.game,kind:'game'});
+  function blocks(items,pattern,kind,expectedBytes) {
+    if (!Array.isArray(items) || !items.length) throw new Error('分块清单无效。');
+    let bytes=0;
+    for (let index=0;index<items.length;index++) {
+      const item=items[index],path=`assets/${pattern}-${String(index).padStart(3,'0')}.bin`;
+      if (item.path!==path || !Number.isSafeInteger(item.bytes) || item.bytes<1 || item.bytes>262144 || !SHA256.test(item.sha256)) {
+        throw new Error('分块路径、大小或校验信息无效。');
+      }
+      const url=new URL(item.path,ROOT);
+      if (!inScope(url) || files.has(url.href)) throw new Error('分块路径越过scope或重复。');
+      files.set(url.href,{...item,kind});bytes+=item.bytes;
+    }
+    if (!Number.isSafeInteger(expectedBytes) || bytes!==expectedBytes) throw new Error('分块总大小不匹配。');
+  }
+  blocks(value.game.chunks,'game','game-chunk',value.game.bytes);
   for (const key of ['chrome','webkit']) {
     const engine = value.engines?.[key];
-    if (!Array.isArray(engine?.chunks) || !engine.chunks.length || !SHA256.test(engine.gzipSha256)) throw new Error('引擎分块清单无效。');
-    let bytes = 0;
-    for (const item of engine.chunks) {
-      if (typeof item.path !== 'string' || !new RegExp(`^assets/engine-${key}-[0-9]{3,}\\.bin$`).test(item.path)
-          || !Number.isSafeInteger(item.bytes) || item.bytes < 1 || item.bytes > 1048576 || !SHA256.test(item.sha256)) {
-        throw new Error('引擎分块路径、大小或校验信息无效。');
-      }
-      const url = new URL(item.path,ROOT);
-      if (!inScope(url) || files.has(url.href)) throw new Error('分块路径越过scope或重复。');
-      files.set(url.href,{...item,kind:'chunk'});bytes+=item.bytes;
-    }
-    if (!Number.isSafeInteger(engine.gzipBytes) || bytes !== engine.gzipBytes) throw new Error('引擎分块总大小不匹配。');
+    if (!SHA256.test(engine?.gzipSha256)) throw new Error('引擎分块清单无效。');
+    blocks(engine.chunks,`engine-${key}`,'chunk',engine.gzipBytes);
   }
   return {manifest:value,files,CACHED_SET:new Set(files.keys())};
 }
@@ -55,10 +66,10 @@ function validateManifest(value) {
 async function verify(data, expected) {
   if (!expected) return;
   if (data.byteLength !== expected.bytes) throw new Error('资源大小校验失败。');
-  if (expected.kind === 'chunk') {
+  if (expected.sha256) {
     const digest = await crypto.subtle.digest('SHA-256',data);
     const actual = [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
-    if (actual !== expected.sha256) throw new Error('引擎分块SHA-256校验失败。');
+    if (actual !== expected.sha256) throw new Error('资源SHA-256校验失败。');
   }
 }
 
@@ -67,37 +78,124 @@ async function download(url, cache, expected = null) {
   let failure;
   for (let attempt=0;attempt<2;attempt++) {
     const controller = new AbortController();
-    const timer = setTimeout(()=>controller.abort(),40000);
+    let idleTimer,reader;
+    const abort = message=>controller.abort(Object.assign(new Error(message),{name:'AbortError'}));
+    const resetIdle = ()=>{clearTimeout(idleTimer);idleTimer=setTimeout(()=>abort('40秒未收到新数据，下载超时。'),40000);};
+    const absoluteTimer=setTimeout(()=>abort('下载达到180秒总时限。'),180000);
+    const aborted=new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>reject(controller.signal.reason),{once:true}));
+    resetIdle();
     try {
-      const response = await fetch(new Request(url,{cache:'reload',redirect:'error',signal:controller.signal}));
+      const response = await Promise.race([fetch(new Request(url,{cache:'reload',redirect:'error',signal:controller.signal})),aborted]);
       if (!response.ok || response.status !== 200) throw new Error(`资源下载失败（HTTP ${response.status}）。`);
-      if (expected?.kind === 'game' && !response.headers.get('Content-Type')?.includes('text/html')) throw new Error('游戏资源不是有效的HTML。');
-      const data = await response.arrayBuffer();
+      resetIdle();
+      reader=response.body.getReader();
+      const parts=[];let received=0;
+      for (;;) {
+        const {done,value}=await Promise.race([reader.read(),aborted]);
+        if (done) break;
+        if (value.byteLength) {
+          received+=value.byteLength;
+          if (expected && received>expected.bytes) throw new Error('接收到的资源超出声明大小。');
+          parts.push(value);resetIdle();
+        }
+      }
+      // 网络完成后停止网络计时；本地SHA与Cache写入不再被误判为网络闲置。
+      clearTimeout(idleTimer);clearTimeout(absoluteTimer);
+      const data=new Uint8Array(received);let offset=0;
+      for (const part of parts) {data.set(part,offset);offset+=part.byteLength;}
       await verify(data,expected);
       if (url === MANIFEST) validateManifest(JSON.parse(await new Response(data).text()));
       // fetch已解码HTTP传输压缩；重建响应时不要再保留传输编码标记。
       const headers = new Headers(response.headers);
       headers.delete('Content-Encoding');headers.set('Content-Length',String(data.byteLength));
-      const complete = new Response(data,{status:200,headers});
-      await cache.put(url,complete.clone());
-      return complete;
-    } catch(error) {failure=error;} finally {clearTimeout(timer);}
+      const target=expected?.kind==='chunk'||expected?.kind==='game-chunk'?blockKey(expected):url;
+      await cache.put(target,new Response(data,{status:200,headers}));
+      return new Response(data,{status:200,headers});
+    } catch(error) {failure=error;} finally {
+      clearTimeout(idleTimer);clearTimeout(absoluteTimer);
+      if(reader)void reader.cancel().catch(()=>{});
+      else if(!controller.signal.aborted)controller.abort();
+    }
   }
-  throw new Error(`${failure?.name==='AbortError'?'资源下载超时（每次最多40秒）':failure?.message||'资源下载失败'} 已重试一次，可点击“重试准备”继续。`);
+  throw new Error(`${failure?.message||'资源下载失败'} 已重试一次，可点击“重试准备”继续。`);
 }
 
 async function resource(url,cache,expected = null) {
+  if (expected?.kind==='chunk'||expected?.kind==='game-chunk') return block(expected);
   const cached = await cache.match(url);
   if (cached) {
-    try {await verify(await cached.clone().arrayBuffer(),expected);return cached;}
+    if (!expected) return cached;
+    try {
+      const data=await cached.arrayBuffer();await verify(data,expected);
+      return new Response(data,{status:200,headers:cached.headers});
+    }
     catch {await cache.delete(url);}
   }
   return download(url,cache,expected);
 }
 
 async function readManifest(cache) {
-  const response = await resource(MANIFEST,cache);
-  return validateManifest(await response.json());
+  if (!manifestPromise) manifestPromise=(async()=>{
+    const response=await resource(MANIFEST,cache);
+    return validateManifest(await response.json());
+  })().catch(error=>{manifestPromise=null;throw error;});
+  return manifestPromise;
+}
+
+function blockKey(item) {return new URL(item.sha256,BLOCK_ROOT).href;}
+
+async function block(item) {
+  const key=blockKey(item),cache=await caches.open(BLOCK_CACHE);
+  const cached=await cache.match(key);
+  if(cached) {
+    if(verifiedBlocks.has(key)) return cached;
+    try {
+      const data=await cached.arrayBuffer();await verify(data,item);verifiedBlocks.add(key);
+      return new Response(data,{status:200,headers:cached.headers});
+    }catch {await cache.delete(key);verifiedBlocks.delete(key);}
+  }
+  let task=blockJobs.get(key);
+  if(!task) {
+    task=download(new URL(item.path,ROOT).href,cache,item).then(response=>{verifiedBlocks.add(key);return response;})
+      .finally(()=>blockJobs.delete(key));
+    blockJobs.set(key,task);
+  }
+  await task;
+  return cache.match(key);
+}
+
+async function cacheBlocks(items,files,progress) {
+  let completed=0,next=0,failure;progress(completed,items.length);
+  const fetchNext=async()=>{
+    while(next<items.length&&!failure) {
+      const item=items[next++];
+      try {await block(files.get(new URL(item.path,ROOT).href));completed++;progress(completed,items.length);}
+      catch(error){failure ||= error;}
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(4,items.length)},fetchNext));
+  if(failure)throw failure;
+}
+
+async function assembleGame(game,cache,files) {
+  const url=new URL(game.path,ROOT).href,known=await cache.match(url);
+  if(known) {
+    if(verifiedGames.has(game.sha256))return known;
+    try {
+      const data=await known.arrayBuffer();await verify(data,game);verifiedGames.add(game.sha256);
+      return new Response(data,{status:200,headers:known.headers});
+    }catch {await cache.delete(url);}
+  }
+  const data=new Uint8Array(game.bytes);let offset=0;
+  for(const item of game.chunks) {
+    const response=await block(files.get(new URL(item.path,ROOT).href)),part=new Uint8Array(await response.arrayBuffer());
+    data.set(part,offset);offset+=part.byteLength;
+  }
+  if(offset!==game.bytes)throw new Error('完整HTML大小不匹配。');
+  await verify(data,game);
+  const headers={'Content-Type':'text/html; charset=utf-8','Content-Length':String(data.byteLength)};
+  await cache.put(url,new Response(data,{headers}));verifiedGames.add(game.sha256);
+  return new Response(data,{headers});
 }
 
 async function prepareGame(key,notify) {
@@ -111,21 +209,10 @@ async function prepareGame(key,notify) {
     };
     job.promise=(async()=>{
       const cache=await caches.open(CACHE_NAME),{manifest,files}=await readManifest(cache),chunks=manifest.engines[key].chunks;
-      const total=chunks.length;let completed=0,next=0,failure;
-      progress({stage:'game',completed,total});
-      const gameURL=new URL(manifest.game.path,ROOT).href;
-      await resource(gameURL,cache,files.get(gameURL));
-      progress({stage:'chunks',completed,total});
-      const fetchNext=async()=>{
-        while(next<total&&!failure){
-          const item=chunks[next++],url=new URL(item.path,ROOT).href;
-          try {await resource(url,cache,files.get(url));completed++;progress({stage:'chunks',completed,total});}
-          catch(error){failure ||= error;}
-        }
-      };
-      await Promise.all(Array.from({length:Math.min(4,total)},fetchNext));
-      if(failure)throw failure;
-      return {ok:true,version:VERSION,engineKey:key,completed,total};
+      await cacheBlocks(manifest.game.chunks,files,(completed,total)=>progress({stage:'game',completed,total}));
+      await assembleGame(manifest.game,cache,files);
+      await cacheBlocks(chunks,files,(completed,total)=>progress({stage:'chunks',completed,total}));
+      return {ok:true,version:VERSION,engineKey:key,completed:chunks.length,total:chunks.length};
     })().finally(()=>jobs.delete(key));
   }
   job.listeners.add(notify);
@@ -143,8 +230,22 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil((async()=>{
+    const cache=await caches.open(CACHE_NAME),{files}=await readManifest(cache);
+    const keep=new Set([...files.values()].filter(item=>item?.kind==='chunk'||item?.kind==='game-chunk').map(blockKey));
+    const blocks=await caches.open(BLOCK_CACHE);
+    for(const request of await blocks.keys()) {
+      const url=new URL(request.url);
+      if(url.origin===ROOT.origin&&url.pathname.startsWith(BLOCK_ROOT.pathname)&&!keep.has(url.href))await blocks.delete(request);
+    }
     for (const name of await caches.keys()) {
-      if (name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME) await caches.delete(name);
+      if(name===CACHE_NAME)continue;
+      if(name.startsWith(SCOPE_CACHE_PREFIX))await caches.delete(name);
+      else if(name.startsWith(CACHE_PREFIX)&&!/^%2f/i.test(name.slice(CACHE_PREFIX.length))) {
+        // 旧通用cache可能混有嵌套项目；只删当前清单已知的精确URL，保留未知旧条目。
+        const legacy=await caches.open(name);
+        for(const request of await legacy.keys())if(files.has(cacheKey(request.url)))await legacy.delete(request);
+        if(!(await legacy.keys()).length)await caches.delete(name);
+      }
     }
     await self.clients.claim();
   })());
@@ -166,8 +267,9 @@ self.addEventListener('fetch', event => {
   if (request.cache === 'only-if-cached' && request.mode !== 'same-origin') return;
   event.respondWith((async()=>{
     try {
-      const key=cacheKey(url),cache=await caches.open(CACHE_NAME),{files,CACHED_SET}=await readManifest(cache);
-      const response=CACHED_SET.has(key)?await resource(key,cache,files.get(key)):await fetch(request);
+      const key=cacheKey(url),cache=await caches.open(CACHE_NAME),{manifest,files,CACHED_SET}=await readManifest(cache);
+      const response=key===new URL(manifest.game.path,ROOT).href?await assembleGame(manifest.game,cache,files):
+        CACHED_SET.has(key)?await resource(key,cache,files.get(key)):await fetch(request);
       // 从缓存读取时同样补头，保证断网导航仍有跨源隔离。
       return isolated(response);
     } catch {
