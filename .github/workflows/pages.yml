@@ -1,0 +1,58 @@
+name: Deploy web playtest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'game/**'
+      - 'web/**'
+      - 'docs/images/logo.svg'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Check web entry
+        run: |
+          npm test
+          node --check web/launch.js
+          node --check web/service-worker.js
+          node --test web/web.test.mjs
+      - name: Build real seekdb game and web entry
+        run: |
+          mkdir -p _site
+          python3 game/打包单页.py --output _site/game.html --manifest "$RUNNER_TEMP/seekdb-web-build.json"
+          cp web/index.html web/launch.js web/styles.css web/service-worker.js _site/
+          cp docs/images/logo.svg _site/logo.svg
+          python3 - <<'PY'
+          import os, pathlib
+          path = pathlib.Path('_site/service-worker.js')
+          path.write_text(path.read_text().replace('__BUILD_ID__', os.environ['GITHUB_SHA'][:12]))
+          PY
+          node --check _site/service-worker.js
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

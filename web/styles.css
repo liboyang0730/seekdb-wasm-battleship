@@ -1,0 +1,19 @@
+:root {color-scheme:light;font-family:ui-monospace,"PingFang SC","Microsoft YaHei",sans-serif;color:#fff1c6;background:#0c2238;}
+* {box-sizing:border-box;}
+body {margin:0;min-height:100vh;display:grid;place-items:center;padding:48px 24px;background:linear-gradient(145deg,#0c2238,#134263);}
+.launch-card {width:min(100%,850px);padding:40px;border:2px solid #4c8091;box-shadow:10px 10px 0 #071827;background:#102b42;}
+.logo {max-width:100%;height:auto;object-fit:contain;object-position:left;}
+.eyebrow {color:#9ed4d2;letter-spacing:.06em;font-size:16px;}
+h1 {font-size:clamp(48px,7vw,76px);line-height:1.1;margin:24px 0 12px;color:#ff887a;}
+p {font-size:18px;line-height:1.7;overflow-wrap:anywhere;}
+.lead {font-size:26px;margin-top:0;}
+.status {padding:20px;border-left:5px solid #ffd35d;background:#173c53;min-height:96px;font-size:21px;}
+.status[data-tone=error] {border-color:#ff887a;}
+.actions {display:flex;gap:16px;flex-wrap:wrap;margin:24px 0;}
+button {font:inherit;font-size:23px;font-weight:700;padding:16px 28px;border:2px solid #fff1c6;color:#102b42;background:#ffd35d;cursor:pointer;}
+button:disabled {opacity:.5;cursor:wait;}
+button:hover:not(:disabled),button:focus-visible {background:#fff1c6;outline:3px solid #1683b5;outline-offset:4px;}
+button[hidden] {display:none;}
+a {color:#9ed4d2;font-size:18px;line-height:1.8;}
+.footnote {color:#c3d2d6;font-size:16px;}
+@media(max-width:700px) {.launch-card{padding:24px;}body{padding:24px 16px;}}
