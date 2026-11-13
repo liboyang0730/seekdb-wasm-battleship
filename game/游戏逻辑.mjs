@@ -5,7 +5,7 @@ import {createReconTask,createDetailTask} from './检索任务.mjs';
 import {normalizeSupportRows,planSql,supportEnemyPlan} from './战术规划.mjs';
 import {drawAxisNumber, drawAxisLetter} from './棋盘字模.mjs';
 import {SEA_PALETTE,drawSeaCell} from './海面像素.mjs';
-import {ICON_SIZE, drawPixelIcon, getLevelRewards, WEAPON_INFO} from './像素图鉴.mjs';
+import {ICON_SIZE, drawPixelIcon, getLevelRewards, getRewardDisplayCards, WEAPON_INFO} from './像素图鉴.mjs';
 import {createDetailEvidence, buildDetailQuery, isTacticalClueKind} from './细节检索.mjs';
 import {checkRecon, canUseFork, chartColumn, canEnterSea, FORK_DESCRIPTION} from './作战流程.mjs';
 import {DynamicTableResources} from './资源清理.mjs';
@@ -24,6 +24,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const LIMITS = ROUND_LIMITS;
 const COMBAT_SPEED = 0.45;
 const COMBAT_PLAYBACK_RATE = 1.2;
+const REWARD_PROMPT = '本关奖励已解锁，请查看下方介绍并确认领取。';
 const isExtraClueKind = kind => kind !== 'dense_half' && isTacticalClueKind(kind);
 const DETAIL_MISSIONS = [
   ['新兵认船','确认哪一带有完整舰，练习命中后追击。'],
@@ -904,7 +905,7 @@ async function victory() {
   await saveState();
   notify(`第${campaign.level}关胜利。${level.reward ? `获得“${MEDALS[level.reward][0]}”勋章。` : '六关战役完成。'}`, 'hit');
   showResult(campaign.level === 6 ? '六海域突破 · 战役完成' : '海域肃清 · 请领取勋章与装备',
-    level.reward ? `“${MEDALS[level.reward][0]}”：${MEDALS[level.reward][1]}` : `本次海图 ${campaign.seed}，战术评分 ${campaign.score}；数据库汇总战役笔记 ${campaign.summaryRows.reduce((sum, row) => sum + Number(row.total), 0)} 条。`,
+    level.reward ? REWARD_PROMPT : `本次海图 ${campaign.seed}，战术评分 ${campaign.score}；数据库汇总战役笔记 ${campaign.summaryRows.reduce((sum, row) => sum + Number(row.total), 0)} 条。`,
     campaign.level < 6 ? '携勋章进入下一关' : '全新海图再出航');
 }
 
@@ -942,12 +943,15 @@ function renderRewards() {
   const gallery=$('reward-gallery');if(!gallery)return;
   const won=state?.phase==='victory';gallery.hidden=!won;
   const nodes=[];
-  if(won)for(const card of state.rewardCards) {
+  // 同时处理旧OPFS胜利存档，避免页顶再次复述卡片中的效果。
+  if(won && campaign.level<6)$('result-copy').textContent=REWARD_PROMPT;
+  if(won)for(const card of getRewardDisplayCards(state.rewardCards)) {
     const item=element('article','reward-card');item.dataset.rewardKind=card.kind;item.dataset.rewardId=card.id;
     item.append(iconCanvas(card.icon,`${card.title}像素图标`));
     const text=element('div','reward-content');
     text.append(element('span','reward-type',card.kind==='medal'?'获得勋章':card.kind==='weapon'?'解锁新武器':'解锁战术技能'),element('h5','',card.title));
-    text.append(element('p','reward-effect',`游戏效果：${card.description}`));
+    for(const unlock of card.relatedUnlocks)text.append(element('p','reward-unlock',`解锁${unlock.kind==='weapon'?'新武器':'战术技能'}：${unlock.title}`));
+    if(card.description)text.append(element('p','reward-effect',`游戏效果：${card.description}`));
     if(card.featureDescription){
       text.append(element('h6','reward-feature-title',`seekdb 特性 · ${card.featureTitle}`),element('p','reward-feature',card.featureDescription));
       const link=element('a','reward-feature-link','查看官方介绍 ↗');link.href=card.featureUrl;link.target='_blank';link.rel='noopener noreferrer';text.append(link);

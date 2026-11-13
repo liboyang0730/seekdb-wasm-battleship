@@ -312,6 +312,7 @@ body[data-view="battle"] .recent-battle-log > div { font-size: 24px; }
 .reward-station:has(> .reward-gallery[hidden]) { display: none; }
 .reward-heading { margin-bottom: 16px; color: var(--hit); font-size: 28px; font-weight: 400; }
 .reward-gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+.reward-card:only-child { grid-column: 1 / -1; }
 .reward-card { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 14px; min-width: 0; padding: 16px; border: 3px solid var(--edge); color: var(--ink); background: var(--selected); box-shadow: 4px 4px 0 var(--edge); }
 .reward-gallery canvas { display: block; width: 64px; height: 64px; image-rendering: pixelated; }
 .reward-card h4, .reward-card h5, .reward-card strong { display: block; margin: 0 0 7px; line-height: 1.35; color: var(--ink); font-size: 26px; font-weight: 400; overflow-wrap: anywhere; }

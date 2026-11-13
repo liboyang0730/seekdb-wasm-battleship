@@ -1,6 +1,6 @@
 {
   "name": "seekdb-wasm-battleship",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "基于真实 seekdb WebAssembly 的中文像素海战游戏",
   "type": "module",

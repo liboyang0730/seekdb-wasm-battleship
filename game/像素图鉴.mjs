@@ -198,3 +198,29 @@ export function getLevelRewards(level) {
   return (REWARDS[id] ?? []).map(card => ({ ...card, ...FEATURE_INFO[card.id],
     ...(card.pattern ? { pattern: { size: card.pattern.size, cells: card.pattern.cells.map(cell => ({ ...cell })) } } : {}) }));
 }
+
+/** 仅整理展示副本；旧存档和实际奖励列表仍保持完整。 */
+export function getRewardDisplayCards(rewards) {
+  const cards = [], identical = new Map(), effects = new Set(), features = new Set();
+  for (const reward of rewards) {
+    const identity = JSON.stringify([reward.id, reward.description, reward.featureDescription]);
+    const previous = identical.get(identity);
+    if (previous) {
+      if (reward.title !== previous.title) previous.relatedUnlocks.push({kind: reward.kind, title: reward.title});
+      continue;
+    }
+    const card = {...reward, relatedUnlocks: []};
+    identical.set(identity, card);
+    if (card.description) {
+      if (effects.has(card.description)) delete card.description;
+      else effects.add(card.description);
+    }
+    if (card.featureDescription) {
+      if (features.has(card.featureDescription)) {
+        delete card.featureDescription; delete card.featureTitle; delete card.featureUrl;
+      } else features.add(card.featureDescription);
+    }
+    cards.push(card);
+  }
+  return cards;
+}

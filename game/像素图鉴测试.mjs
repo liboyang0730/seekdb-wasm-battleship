@@ -1,6 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ICON_SIZE, drawPixelIcon, getLevelRewards, WEAPON_INFO } from './像素图鉴.mjs';
+import * as rewardCatalog from './像素图鉴.mjs';
+
+test('所有关卡奖励展示去重，保留不同武器用法和技能名称且不改原奖励', () => {
+  assert.equal(typeof rewardCatalog.getRewardDisplayCards, 'function', '奖励展示需要独立去重');
+  const rewards = [1, 2, 3, 4, 5, 6].map(getLevelRewards);
+  const before = structuredClone(rewards);
+  const display = rewards.map(rewardCatalog.getRewardDisplayCards);
+  assert.deepEqual(display.map(cards => cards.length), [2, 1, 2, 2, 4, 0]);
+  assert.deepEqual(display.map(cards => cards.filter(card => card.featureDescription).length), [2, 1, 1, 1, 2, 0]);
+  assert.deepEqual(display[1][0].relatedUnlocks, [{kind: 'skill', title: '试错机会'}]);
+  for (const cards of display) for (const field of ['description', 'featureDescription']) {
+    const values = cards.map(card => card[field]).filter(Boolean);
+    assert.equal(new Set(values).size, values.length, `${field}不重复`);
+  }
+  assert.equal(display[0][1].title, '嵌入式三联炮');
+  assert.match(display[0][1].description, /三个不同坐标/);
+  assert.match(display[2][1].description, /每四轮/);
+  for (const card of display[4].filter(card => card.kind === 'weapon')) {
+    assert.ok(card.description && card.pattern && card.icon, `${card.title}保留独立玩法`);
+  }
+  assert.deepEqual(rewards, before, '旧存档和解锁记录不能被展示去重修改');
+  assert.deepEqual(rewards.map(rewardCatalog.getRewardDisplayCards), display, '重复渲染结果一致');
+});
 
 function context() {
   const calls = [];

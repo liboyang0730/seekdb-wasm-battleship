@@ -100,7 +100,7 @@ export function setupBattleFit() {
       restore();
       body.dataset.battleFitScale = '1';
       hint.hidden = !inBattle;
-      hint.textContent = `原始大小：可按 ${modifier}− 缩小，${modifier}0 恢复浏览器比例。`;
+      hint.textContent = `原始大小：可用 ${modifier} + 加号放大。${modifier}− 缩小，${modifier}0 恢复浏览器比例。`;
       if (inBattle && anchorPending) win.scrollTo({top: 0, behavior: 'instant'});
       anchorPending = false;
       return;
