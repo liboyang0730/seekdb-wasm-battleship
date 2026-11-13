@@ -2,6 +2,7 @@
   'use strict';
   const base = new URL('./', document.baseURI);
   const workerURL = new URL('service-worker.js', base);
+  const engineKey = navigator.vendor === 'Apple Computer, Inc.' ? 'webkit' : 'chrome';
   const reloadKey = `seekdb-battleship-coi:${base.pathname}`;
   const status = document.getElementById('launch-status');
   const start = document.getElementById('launch-start');
@@ -59,15 +60,28 @@
   function cacheGame() {
     return new Promise((resolve, reject) => {
       const channel = new MessageChannel();
-      const timer = setTimeout(() => finish(new Error('游戏下载超时。请检查网络后点击“重试准备”；已保存的战役不受影响。')), 300000);
+      let finished = false;
+      const timer = setTimeout(() => finish(new Error('游戏下载超时。请检查网络后点击“重试准备”，已成功的分块会继续复用；已保存的战役不受影响。')), 600000);
       function finish(error) {
+        if (finished) return;
+        finished = true;
         clearTimeout(timer); channel.port1.close(); channel.port2.close();
         error ? reject(error) : resolve();
       }
       channel.port1.onmessage = event => {
-        event.data?.ok ? finish() : finish(new Error(event.data?.error || '游戏缓存失败，请重试。'));
+        if (finished) return;
+        const data = event.data;
+        if (data?.type === 'progress') {
+          if (data.stage === 'game') message('正在缓存游戏界面，随后下载当前浏览器所需的引擎分块…');
+          else if (Number.isInteger(data.completed) && Number.isInteger(data.total)) {
+            message(`正在准备${engineKey === 'webkit' ? 'Safari' : '当前浏览器'}引擎：已缓存 ${data.completed} / ${data.total} 块。首次约 18 MB；失败后可点击重试，保留已成功的分块。`);
+          }
+          return;
+        }
+        if (data?.ok === true) finish();
+        else if (data?.ok === false) finish(new Error(data.error || '游戏缓存失败，请重试。'));
       };
-      navigator.serviceWorker.controller.postMessage({type:'prepare-game'}, [channel.port2]);
+      navigator.serviceWorker.controller.postMessage({type:'prepare-game',engineKey}, [channel.port2]);
     });
   }
 
@@ -100,7 +114,7 @@
         return;
       }
       sessionStorage.removeItem(reloadKey);
-      message('正在下载并缓存游戏资源（首次约 45 MB），完成后可在此浏览器断网重访。尚未启动数据库。');
+      message('正在准备分块缓存（首次约 18 MB），只下载当前浏览器所需引擎。完成后可断网重访；尚未启动数据库。');
       await cacheGame();
       await checkGameLock();
       ready = true; start.disabled = false;

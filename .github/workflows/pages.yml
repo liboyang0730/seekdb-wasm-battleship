@@ -23,9 +23,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Check web entry
         run: |
           npm test
+          python3 -m unittest discover -s web -p 'test_*.py'
           node --check web/launch.js
           node --check web/service-worker.js
           node --test web/web.test.mjs
@@ -33,6 +37,7 @@ jobs:
         run: |
           mkdir -p _site
           python3 game/打包单页.py --output _site/game.html --manifest "$RUNNER_TEMP/seekdb-web-build.json"
+          python3 web/build-site.py --game _site/game.html --site _site
           cp web/index.html web/launch.js web/styles.css web/service-worker.js _site/
           cp docs/images/logo.svg _site/logo.svg
           python3 - <<'PY'
