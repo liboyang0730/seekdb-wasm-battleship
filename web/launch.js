@@ -1,6 +1,8 @@
 (() => {
   'use strict';
   const base = new URL('./', document.baseURI);
+  // 候选线路仅在明确指定时启用，完成冷启动验收后再调整默认。
+  const useCDN = new URL(document.baseURI).searchParams.get('cdn') === '1';
   const workerURL = new URL('service-worker.js', base);
   const engineKey = navigator.vendor === 'Apple Computer, Inc.' ? 'webkit' : 'chrome';
   const reloadKey = `seekdb-battleship-coi:${base.pathname}`;
@@ -85,7 +87,7 @@
         if (data?.ok === true) finish();
         else if (data?.ok === false) finish(new Error(data.error || '游戏缓存失败，请重试。'));
       };
-      navigator.serviceWorker.controller.postMessage({type:'prepare-game',engineKey}, [channel.port2]);
+      navigator.serviceWorker.controller.postMessage({type:'prepare-game',engineKey,useCDN}, [channel.port2]);
     });
   }
 

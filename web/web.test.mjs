@@ -7,6 +7,13 @@ import {createHash} from 'node:crypto';
 const base = 'https://example.github.io/seekdb-wasm-battleship/';
 const file = name => new URL(name, import.meta.url);
 const sha = data => createHash('sha256').update(data).digest('hex');
+const cdnBase='https://cdn.jsdelivr.net/gh/liboyang0730/seekdb-wasm-battleship@c124fb775e397e24bee71b95901302434c4a1dde/';
+const mirrorSignature=value=>sha(JSON.stringify([
+  [value.game.path,value.game.bytes,value.game.sha256],
+  value.game.chunks.map(item=>[item.path,item.bytes,item.sha256]),
+  ...['chrome','webkit'].map(key=>[key,value.engines[key].gzipBytes,value.engines[key].gzipSha256,
+    value.engines[key].chunks.map(item=>[item.path,item.bytes,item.sha256])]),
+]));
 const gameBody = Buffer.from('<html>真实构建的游戏</html>');
 const gameBodies = new Map(Array.from({length:3},(_,i)=>
   [`assets/game-${String(i).padStart(3,'0')}.bin`,gameBody.subarray(Math.floor(i*gameBody.length/3),Math.floor((i+1)*gameBody.length/3))]));
@@ -22,11 +29,13 @@ const manifest = {version:'v0.2.1',game:{path:'game.html',bytes:gameBody.length,
 
 // 用标准 Request/Response 执行真实 SW 代码；仅替代 Node 没有的浏览器事件与缓存容器。
 function worker({offline = false, failGame = false, failChunk = '', failOnce = '', corruptChunk = '', staleChunk = '', badManifest = null,
-  delayed = false, streamPath = '', streamDelays = [], headerDelay = 0,sharedStores = new Map(), buildId = 'A'} = {}) {
+  delayed = false, streamPath = '', streamDelays = [], headerDelay = 0,sharedStores = new Map(), buildId = 'A',
+  mirrorManifest=false,cdnFailure='',cdnFailPath=''} = {}) {
   assert.ok(existsSync(file('service-worker.js')), '尚未实现网页隔离与离线缓存');
   const events = {}, stores = sharedStores, requested = [],attempts=new Map(),abortedRequests=[],requestModes=[];
   let active=0,maxActive=0,timerSerial=0,now=0;
-  const virtualTimers=new Map(),blocks=new Map([...gameBodies,...chunkBodies]);
+  const virtualTimers=new Map(),blocks=new Map([...gameBodies,...chunkBodies]),cdnAttempts=new Map();
+  const virtual=!!streamPath||['idle','absolute'].includes(cdnFailure);
   const timer=(fn,delay)=>{const id=++timerSerial;virtualTimers.set(id,{fn,at:now+delay});return id;};
   const settle=async()=>{for(let i=0;i<20;i++)await Promise.resolve();await new Promise(resolve=>setImmediate(resolve));for(let i=0;i<20;i++)await Promise.resolve();};
   const caches = {
@@ -45,44 +54,51 @@ function worker({offline = false, failGame = false, failChunk = '', failOnce = '
   };
   const context = vm.createContext({URL, Request, Response, Headers, AbortController,
     crypto:{subtle:{async digest(algorithm,data){assert.equal(algorithm,'SHA-256');return Uint8Array.from(createHash('sha256').update(new Uint8Array(data)).digest()).buffer;}}},
-    setTimeout:streamPath?timer:setTimeout,clearTimeout:streamPath?id=>virtualTimers.delete(id):clearTimeout,caches, console,
+    setTimeout:virtual?timer:setTimeout,clearTimeout:virtual?id=>virtualTimers.delete(id):clearTimeout,caches, console,
     self: {registration:{scope:base}, clients:{claim:async()=>{}}, addEventListener:(name, fn)=>{events[name]=fn;}},
     fetch:async input => {
       const url = typeof input === 'string' ? input : input.url;
       requested.push(url);
       if (offline) throw new Error('模拟断网');
-      const path=url.slice(base.length), count=(attempts.get(path)||0)+1;attempts.set(path,count);
-      requestModes.push({path,cache:input.cache});
+      const isCDN=url.startsWith(cdnBase),path=url.slice((isCDN?cdnBase:base).length),counts=isCDN?cdnAttempts:attempts;
+      const count=(counts.get(path)||0)+1;counts.set(path,count);
+      requestModes.push({path,url,cache:input.cache,mode:input.mode,credentials:input.credentials,redirect:input.redirect});
       input.signal.addEventListener('abort',()=>abortedRequests.push(path),{once:true});
       if(path===streamPath&&headerDelay)await new Promise(resolve=>timer(resolve,headerDelay));
       if(delayed&&blocks.has(path)){active++;maxActive=Math.max(maxActive,active);await new Promise(resolve=>setImmediate(resolve));active--;}
       const chunk=blocks.get(path);
       let body=path==='assets.json'?JSON.stringify(badManifest||manifest):chunk|| (path==='game.html'?gameBody:'shell');
-      if(path===corruptChunk||path===staleChunk&&input.cache==='default'&&count===1){body=Buffer.from(body);body[0]^=1;}
-      if(path===streamPath){
+      const cdnFails=isCDN&&(!cdnFailPath||path===cdnFailPath);
+      if(cdnFails&&cdnFailure==='network')throw new TypeError('模拟CDN CORS/网络失败');
+      if(path===corruptChunk||path===staleChunk&&input.cache==='default'&&count===1||cdnFails&&cdnFailure==='sha'){body=Buffer.from(body);body[0]^=1;}
+      const delays=cdnFails&&cdnFailure==='idle'?[9000]:cdnFails&&cdnFailure==='absolute'?[7000,7000,7000,7000]:streamDelays;
+      if(path===streamPath||cdnFails&&['idle','absolute'].includes(cdnFailure)){
         let scheduled,index=0,closed=false;
         body=new ReadableStream({start(controller){
           const emit=()=>{
             if(closed)return;
-            const start=Math.floor(index*chunk.length/streamDelays.length),end=Math.floor((index+1)*chunk.length/streamDelays.length);
+            const start=Math.floor(index*chunk.length/delays.length),end=Math.floor((index+1)*chunk.length/delays.length);
             controller.enqueue(new Uint8Array(chunk.subarray(start,end)));index++;
-            if(index===streamDelays.length){closed=true;controller.close();}
-            else scheduled=timer(emit,streamDelays[index]);
+            if(index===delays.length){closed=true;controller.close();}
+            else scheduled=timer(emit,delays[index]);
           };
-          scheduled=timer(emit,streamDelays[0]);
+          scheduled=timer(emit,delays[0]);
           input.signal.addEventListener('abort',()=>{
             if(closed)return;closed=true;virtualTimers.delete(scheduled);controller.error(input.signal.reason);
           },{once:true});
         },cancel(){closed=true;virtualTimers.delete(scheduled);}});
       }
       return new Response(body, {
-        status:failGame&&gameBodies.has(path)||path===failChunk||path===failOnce&&count===1 ? 503 : 200,
+        status:failGame&&gameBodies.has(path)||path===failChunk||path===failOnce&&count===1||cdnFails&&cdnFailure==='http' ? 503 : 200,
         headers:{'Content-Type':path==='assets.json'?'application/json':url.endsWith('.html') ? 'text/html' : chunk?'application/octet-stream':'text/plain'},
       });
     },
   });
-  vm.runInContext(readFileSync(file('service-worker.js'), 'utf8').replace('__BUILD_ID__',buildId), context);
-  return {events, stores, requested, caches, attempts,stats:()=>({maxActive,now,abortedRequests,requestModes}),setOffline:value=>{offline=value;},setFailChunk:value=>{failChunk=value;},
+  let source=readFileSync(file('service-worker.js'),'utf8').replace('__BUILD_ID__',buildId);
+  // 仅VM夹具替换固定清单指纹；生产文件仍绑定真实发布树，不暴露测试开关。
+  if(mirrorManifest)source=source.replace('160d3aac69d34e89065988809394e17927ed4b2e74d8c09e688e80b7965e593e',mirrorSignature(manifest));
+  vm.runInContext(source, context);
+  return {events, stores, requested, caches, attempts,cdnAttempts,stats:()=>({maxActive,now,abortedRequests,requestModes}),setOffline:value=>{offline=value;},setFailChunk:value=>{failChunk=value;},
     async advance(milliseconds){
       const target=now+milliseconds;await settle();
       for(;;){
@@ -94,7 +110,7 @@ function worker({offline = false, failGame = false, failChunk = '', failOnce = '
     },
     async lifecycle(name) { let pending; events[name]({waitUntil:p=>{pending=p;}}); await pending; },
     async response(url, options={}) { let pending; events.fetch({request:new Request(url, options), respondWith:p=>{pending=p;}, waitUntil:()=>{}}); return pending ? await pending : null; },
-    async prepare(engineKey='chrome') { let pending, reply;const progress=[]; events.message({data:{type:'prepare-game',engineKey},source:{url:base},ports:[{postMessage:value=>{if(typeof value.ok==='boolean')reply=value;else progress.push(value);}}],waitUntil:p=>{pending=p;}}); await pending; return {...reply,progress}; },
+    async prepare(engineKey='chrome',options={}) { let pending, reply;const progress=[]; events.message({data:{type:'prepare-game',engineKey,...options},source:{url:options.sourceURL||base},ports:[{postMessage:value=>{if(typeof value.ok==='boolean')reply=value;else progress.push(value);}}],waitUntil:p=>{pending=p;}}); await pending; return {...reply,progress}; },
   };
 }
 
@@ -186,6 +202,81 @@ test('default返回旧坏块时，第二次reload取得新块且SHA正确才成�
   assert.equal((await w.prepare()).ok,true);assert.equal(w.attempts.get(path),2);
   assert.deepEqual(w.stats().requestModes.filter(item=>item.path===path).map(item=>item.cache),['default','reload']);
   w.setOffline(true);assert.equal((await w.prepare()).ok,true,'只有校验正确的新块可以供断网重用');
+});
+
+test('CDN默认关闭，即使清单匹配也只下载同源块',async()=>{
+  const w=worker({mirrorManifest:true});await w.lifecycle('install');assert.equal((await w.prepare()).ok,true);
+  assert.ok(w.requested.every(url=>url.startsWith(base)));
+});
+
+test('显式CDN仅访问固定commit白名单，透传cors/omit且只取选定引擎',async()=>{
+  const w=worker({mirrorManifest:true,delayed:true});await w.lifecycle('install');
+  const reply=await w.prepare('chrome',{useCDN:true,cdnRoot:'https://evil.example/'});assert.equal(reply.ok,true);
+  const requests=w.stats().requestModes.filter(item=>item.path.endsWith('.bin'));
+  assert.equal(requests.length,manifest.game.chunks.length+manifest.engines.chrome.chunks.length);
+  assert.ok(requests.every(item=>item.url.startsWith(cdnBase)&&item.mode==='cors'&&item.credentials==='omit'&&item.redirect==='error'));
+  assert.ok(w.requested.every(url=>!url.includes('engine-webkit-')));assert.equal(w.stats().maxActive,4);
+  assert.ok(reply.cdn>0);assert.equal(reply.fallback,0);
+  assert.equal((await w.response(base+'game.html')).headers.get('Cross-Origin-Embedder-Policy'),'require-corp');
+});
+
+test('清单签名或分块大小不匹配时不启用CDN，也不接受字符串开关',async()=>{
+  for(const change of [m=>{m.engines.chrome.gzipSha256='0'.repeat(64);},m=>{m.engines.chrome.chunks[0].bytes++;m.engines.chrome.gzipBytes++;}]) {
+    const bad=structuredClone(manifest);change(bad);
+    const w=worker({mirrorManifest:true,badManifest:bad});await w.lifecycle('install');await w.prepare('chrome',{useCDN:true});
+    assert.ok(w.requested.every(url=>url.startsWith(base)));
+  }
+  const w=worker({mirrorManifest:true});await w.lifecycle('install');assert.equal((await w.prepare('chrome',{useCDN:'true'})).ok,true);
+  assert.ok(w.requested.every(url=>url.startsWith(base)));
+});
+
+test('CDN坏SHA/HTTP/CORS失败均只试一次并熔断余块，同源校验后补回',async()=>{
+  for(const cdnFailure of ['sha','http','network']) {
+    const w=worker({mirrorManifest:true,cdnFailure});await w.lifecycle('install');
+    const reply=await w.prepare('chrome',{useCDN:true});assert.equal(reply.ok,true);
+    assert.ok(w.cdnAttempts.size>0&&w.cdnAttempts.size<=manifest.game.chunks.length);
+    assert.ok([...w.cdnAttempts.values()].every(count=>count===1));assert.ok(reply.fallback>0);
+    assert.equal(w.requested.filter(url=>url.startsWith(cdnBase)&&url.includes('engine-')).length,0,'失败后不再对后续引擎块尝试CDN');
+    w.setOffline(true);assert.equal((await w.prepare()).ok,true);
+  }
+});
+
+test('CDN八秒闲置或二十秒总限后立即同源补回，不占用同源重试预算',async()=>{
+  for(const [cdnFailure,elapsed] of [['idle',8001],['absolute',20001]]) {
+    const w=worker({mirrorManifest:true,cdnFailure});await w.lifecycle('install');
+    const pending=w.prepare('chrome',{useCDN:true});await w.advance(elapsed);const reply=await pending;
+    assert.equal(reply.ok,true);assert.ok(reply.fallback>0);
+    assert.ok([...w.cdnAttempts.values()].every(count=>count===1));
+    assert.ok(w.stats().abortedRequests.length>0);assert.ok(w.stats().now<=elapsed);
+  }
+});
+
+test('CDN一次失败后同源仍有首次加一次重试的独立预算',async()=>{
+  const path=manifest.engines.chrome.chunks[0].path;
+  const w=worker({mirrorManifest:true,cdnFailure:'network',cdnFailPath:path,failOnce:path});await w.lifecycle('install');
+  assert.equal((await w.prepare('chrome',{useCDN:true})).ok,true);
+  assert.equal(w.cdnAttempts.get(path),1);assert.equal(w.attempts.get(path),2);
+});
+
+test('同时请求两种引擎时拒绝第二套，仍最多四块并发',async()=>{
+  const w=worker({mirrorManifest:true,delayed:true});await w.lifecycle('install');
+  const first=w.prepare('chrome',{useCDN:true}),second=await w.prepare('webkit',{useCDN:true});
+  assert.equal(second.ok,false);assert.match(second.error,/另一套.*引擎/);assert.equal((await first).ok,true);
+  assert.equal(w.stats().maxActive,4);assert.ok(w.requested.every(url=>!url.includes('engine-webkit-')));
+});
+
+test('已有SHA缓存准备CDN模式零远程，direct miss仍只走同源',async()=>{
+  const w=worker({mirrorManifest:true});await w.lifecycle('install');await w.prepare();const before=w.requested.length;
+  assert.equal((await w.prepare('chrome',{useCDN:true})).ok,true);assert.equal(w.requested.length,before);
+  const fresh=worker({mirrorManifest:true});await fresh.lifecycle('install');
+  assert.equal((await fresh.response(base+manifest.engines.chrome.chunks[0].path)).status,200);
+  assert.equal(fresh.cdnAttempts.size,0);
+});
+
+test('其他scope消息不能启用CDN或修改缓存',async()=>{
+  const w=worker({mirrorManifest:true});await w.lifecycle('install');const before=w.requested.length;
+  const reply=await w.prepare('chrome',{useCDN:true,sourceURL:'https://example.github.io/other/'});
+  assert.equal(reply.ok,undefined);assert.equal(w.requested.length,before);assert.equal(w.cdnAttempts.size,0);
 });
 
 test('manifest路径越过scope时拒绝安装，不可进入缓存白名单',async()=>{
@@ -302,9 +393,9 @@ test('入口只在隔离及同源控制器就绪后允许跳转，不含游戏�
 });
 
 // 在隔离VM内执行整个入口；虚拟时钟替代真实等待，不给生产代码增加测试全局。
-function launcher({releaseAt=Infinity,vendor='',progressOnly=false,progress={type:'progress',stage:'chunks',completed:1,total:3}}={}) {
+function launcher({releaseAt=Infinity,vendor='',pageURL=base,progressOnly=false,progress={type:'progress',stage:'chunks',completed:1,total:3}}={}) {
   let now=0, serial=0, queries=0, requests=0, cached=0, storageOpens=0;
-  const timers=new Map(), assigned=[],engineKeys=[];
+  const timers=new Map(), assigned=[],engineKeys=[],cdnFlags=[];
   const node=props=>({...props,events:{},addEventListener(name,fn){this.events[name]=fn;}});
   const elements={
     'launch-status':node({textContent:'',dataset:{}}),
@@ -314,7 +405,7 @@ function launcher({releaseAt=Infinity,vendor='',progressOnly=false,progress={typ
   const scriptURL=new URL('service-worker.js',base).href;
   const registration={scope:base,active:{scriptURL}};
   const controller={scriptURL,postMessage(data,ports){
-    assert.equal(data.type,'prepare-game');cached++;engineKeys.push(data.engineKey);
+    assert.equal(data.type,'prepare-game');cached++;engineKeys.push(data.engineKey);cdnFlags.push(data.useCDN);
     queueMicrotask(()=>{
       ports[0].complete(progress);
       if(!progressOnly)ports[0].complete({ok:true});
@@ -327,9 +418,9 @@ function launcher({releaseAt=Infinity,vendor='',progressOnly=false,progress={typ
     }
   }
   const session=new Map();
-  const context=vm.createContext({URL,console,SharedArrayBuffer,MessageChannel:Channel,
-    document:{baseURI:base,getElementById:id=>elements[id]},
-    window:{isSecureContext:true,crossOriginIsolated:true,location:{assign:url=>assigned.push(url),reload(){throw new Error('已隔离时不应刷新');}}},
+  const context=vm.createContext({URL,URLSearchParams,console,SharedArrayBuffer,MessageChannel:Channel,
+    document:{baseURI:pageURL,getElementById:id=>elements[id]},
+    window:{isSecureContext:true,crossOriginIsolated:true,location:{href:pageURL,search:new URL(pageURL).search,assign:url=>assigned.push(url),reload(){throw new Error('已隔离时不应刷新');}}},
     navigator:{vendor,
       storage:{getDirectory(){storageOpens++;throw new Error('入口不能打开OPFS');}},
       locks:{query:async()=>{queries++;return{held:now<releaseAt?[{name:'seekdb-wasm-opfs'}]:[]};},request(){requests++;throw new Error('入口不能申请数据库锁');}},
@@ -344,7 +435,7 @@ function launcher({releaseAt=Infinity,vendor='',progressOnly=false,progress={typ
   vm.runInContext(readFileSync(file('launch.js'),'utf8'),context);
   const settle=async()=>{for(let i=0;i<35;i++)await Promise.resolve();};
   return {elements,assigned,settle,
-    stats:()=>({now,queries,requests,cached,storageOpens,engineKeys}),
+    stats:()=>({now,queries,requests,cached,storageOpens,engineKeys,cdnFlags}),
     async advance(milliseconds){
       const target=now+milliseconds;await settle();
       for(;;){
@@ -356,6 +447,22 @@ function launcher({releaseAt=Infinity,vendor='',progressOnly=false,progress={typ
     },
   };
 }
+
+test('入口仅cdn=1显式开启候选镜像，并保持当前浏览器引擎选择',async()=>{
+  for(const pageURL of [base+'?cdn=1',base+'index.html?other=1&cdn=1#test']) {
+    const app=launcher({releaseAt:0,pageURL,vendor:'Apple Computer, Inc.'});await app.settle();
+    assert.deepEqual(app.stats().cdnFlags,[true]);assert.deepEqual(app.stats().engineKeys,['webkit']);
+    assert.equal(app.elements['launch-start'].disabled,false);assert.equal(app.stats().storageOpens,0);
+  }
+});
+
+test('入口默认及其他cdn参数值明确关闭镜像，不把hash或大小写当开关',async()=>{
+  for(const suffix of ['', '?cdn=0','?cdn=true','?cdn=01','?cdn=','?CDN=1','#cdn=1','?other=1']) {
+    const app=launcher({releaseAt:0,pageURL:base+suffix});await app.settle();
+    assert.deepEqual(app.stats().cdnFlags,[false],suffix||'默认URL');
+    assert.equal(app.elements['launch-start'].disabled,false);assert.equal(app.stats().storageOpens,0);
+  }
+});
 
 test('旧页面锁先held后释放：入口等待后自动ready，不要求用户再次重试',async()=>{
   const app=launcher({releaseAt:300});await app.settle();
