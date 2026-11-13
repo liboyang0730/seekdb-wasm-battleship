@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "engineSource": "seekdb official browser shell release",
+  "release": "d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887",
+  "gzipSource": "Byte-identical concatenation of the existing verified assets.json engine chunks; compressed SHA identifies this distribution gzip, raw SHA identifies the official original Wasm.",
+  "engines": {
+    "chrome": {
+      "path": "engine-chrome.wasm.gz",
+      "gzipBytes": 16260386,
+      "gzipSha256": "ec9a30fbbeefb4f16089782f7830ae35f2e494100bf030cfeeab97d2917cc577",
+      "rawBytes": 57093736,
+      "rawSha256": "8122b07878b15bd565090473b73fd623684c346325eb2d0d053b36b30253bfbb",
+      "officialRawUrl": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/seekdb_wasm_database.wasm"
+    },
+    "webkit": {
+      "path": "engine-webkit.wasm.gz",
+      "gzipBytes": 16469179,
+      "gzipSha256": "022b4322ff609c372be2ef544fba8284fd2a5b7dea845e433686cd4149d7b13b",
+      "rawBytes": 58713214,
+      "rawSha256": "9f7ca760a80fdd2fc88bd35c078d7dacde43f14a698005748f50a5b335765f39",
+      "officialRawUrl": "https://www.seekdb.ai/shell/releases/d2ece8f7aba157c0e18f600bd876000302f61d879426cbf1c96b2d501ee89887/engine/seekdb_wasm_database.webkit.wasm"
+    }
+  },
+  "license": "Apache-2.0; see LICENSE-seekdb-APACHE-2.0.txt",
+  "notice": {
+    "path": "NOTICE-seekdb.txt",
+    "source": "Upstream v1.4.0 source tree, commit de5be277d4398b0cad018a666a54be0d99470543; retained original bytes.",
+    "boundary": "Exact browser-shell/source-commit mapping and a complete linked dependency list have not been established; this NOTICE is not a complete binary SBOM."
+  },
+  "runtime": "Only two gzip-compressed official Wasm binaries and attribution are included. No game HTML/source, split blocks, player data, ROM, or executable launcher is included."
+}
