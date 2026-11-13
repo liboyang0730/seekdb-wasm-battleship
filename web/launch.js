@@ -27,9 +27,17 @@
 
   async function checkGameLock() {
     if (typeof navigator.locks?.query !== 'function') return;
-    const {held} = await navigator.locks.query();
-    if (held.some(lock => lock.name === 'seekdb-wasm-opfs')) {
-      throw new Error('同一浏览器已有游戏正在运行。请先关闭原游戏标签页，稍候再点击“重试准备”；不要清理网站数据。');
+    const occupied = '同一浏览器已有游戏正在运行。请先关闭原游戏标签页，稍候再点击“重试准备”；不要清理网站数据。';
+    const deadline = performance.now() + 3500;
+    for (;;) {
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) throw new Error(occupied);
+      const {held} = await timeout(navigator.locks.query(), remaining, occupied);
+      if (!held.some(lock => lock.name === 'seekdb-wasm-opfs')) return;
+      // 页面离开后旧 Worker 可能稍晚才释放锁；仅查询等待，不申请锁或打开数据库。
+      const wait = Math.min(150, deadline - performance.now());
+      if (wait <= 0) throw new Error(occupied);
+      await new Promise(resolve => setTimeout(resolve, wait));
     }
   }
 

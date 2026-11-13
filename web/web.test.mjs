@@ -104,3 +104,82 @@ test('入口只在隔离及同源控制器就绪后允许跳转，不含游戏�
   assert.doesNotMatch(html,/游戏逻辑|数据库\.mjs|<iframe|game\.html["']/);
   assert.doesNotMatch(js,/Database\.open|NavalDB\.open/);
 });
+
+// 在隔离VM内执行整个入口；虚拟时钟替代真实等待，不给生产代码增加测试全局。
+function launcher({releaseAt=Infinity}={}) {
+  let now=0, serial=0, queries=0, requests=0, cached=0, storageOpens=0;
+  const timers=new Map(), assigned=[];
+  const node=props=>({...props,events:{},addEventListener(name,fn){this.events[name]=fn;}});
+  const elements={
+    'launch-status':node({textContent:'',dataset:{}}),
+    'launch-start':node({disabled:true}),
+    'launch-retry':node({hidden:true}),
+  };
+  const scriptURL=new URL('service-worker.js',base).href;
+  const registration={scope:base,active:{scriptURL}};
+  const controller={scriptURL,postMessage(data,ports){
+    assert.equal(data.type,'prepare-game');cached++;
+    queueMicrotask(()=>ports[0].complete({ok:true}));
+  }};
+  class Channel {
+    constructor(){
+      this.port1={onmessage:null,close(){}};
+      this.port2={close(){},complete:data=>this.port1.onmessage({data})};
+    }
+  }
+  const session=new Map();
+  const context=vm.createContext({URL,console,SharedArrayBuffer,MessageChannel:Channel,
+    document:{baseURI:base,getElementById:id=>elements[id]},
+    window:{isSecureContext:true,crossOriginIsolated:true,location:{assign:url=>assigned.push(url),reload(){throw new Error('已隔离时不应刷新');}}},
+    navigator:{
+      storage:{getDirectory(){storageOpens++;throw new Error('入口不能打开OPFS');}},
+      locks:{query:async()=>{queries++;return{held:now<releaseAt?[{name:'seekdb-wasm-opfs'}]:[]};},request(){requests++;throw new Error('入口不能申请数据库锁');}},
+      serviceWorker:{controller,ready:Promise.resolve(registration),getRegistration:async()=>registration,register:async()=>registration,
+        addEventListener(){},removeEventListener(){}},
+    },
+    sessionStorage:{getItem:key=>session.get(key),setItem:(key,value)=>session.set(key,value),removeItem:key=>session.delete(key)},
+    performance:{now:()=>now},
+    setTimeout:(fn,delay)=>{const id=++serial;timers.set(id,{fn,at:now+delay});return id;},
+    clearTimeout:id=>timers.delete(id),
+  });
+  vm.runInContext(readFileSync(file('launch.js'),'utf8'),context);
+  const settle=async()=>{for(let i=0;i<35;i++)await Promise.resolve();};
+  return {elements,assigned,settle,
+    stats:()=>({now,queries,requests,cached,storageOpens}),
+    async advance(milliseconds){
+      const target=now+milliseconds;await settle();
+      for(;;){
+        const next=[...timers].filter(([,t])=>t.at<=target).sort((a,b)=>a[1].at-b[1].at)[0];
+        if(!next)break;
+        now=next[1].at;timers.delete(next[0]);next[1].fn();await settle();
+      }
+      now=target;await settle();
+    },
+  };
+}
+
+test('旧页面锁先held后释放：入口等待后自动ready，不要求用户再次重试',async()=>{
+  const app=launcher({releaseAt:300});await app.settle();
+  assert.equal(app.elements['launch-retry'].hidden,true,'短暂持锁不应立即显示另一页面占用错误');
+  assert.equal(app.elements['launch-start'].disabled,true);
+  await app.advance(300);
+  assert.equal(app.elements['launch-start'].disabled,false);
+  assert.match(app.elements['launch-status'].textContent,/资源已缓存/);
+  assert.ok(app.stats().queries>=3);assert.equal(app.stats().cached,1);
+  assert.equal(app.stats().requests,0);assert.equal(app.stats().storageOpens,0);
+  await app.elements['launch-start'].events.click();
+  assert.deepEqual(app.assigned,[new URL('game.html',base).href]);
+});
+
+test('另一页面持续held：有界等待后提示占用，不抢锁、不打开数据库或缓存游戏',async()=>{
+  const app=launcher();await app.settle();
+  assert.equal(app.elements['launch-retry'].hidden,true,'应先等待旧页面异步释放');
+  await app.advance(4000);
+  assert.equal(app.elements['launch-start'].disabled,true);
+  assert.equal(app.elements['launch-retry'].hidden,false);
+  assert.match(app.elements['launch-status'].textContent,/同一浏览器已有游戏正在运行/);
+  assert.ok(app.stats().queries>2);assert.equal(app.stats().cached,0);
+  assert.equal(app.stats().requests,0);assert.equal(app.stats().storageOpens,0);
+  const queries=app.stats().queries;await app.advance(10000);
+  assert.equal(app.stats().queries,queries,'超时提示后不能继续后台轮询');
+});
